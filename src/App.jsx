@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://web-production-7d03f.up.railway.app";
-const IMAGE_BASE = (import.meta.env.VITE_PRODUCT_IMAGE_BASE_URL || "").replace(/\/+$/, "");
+const IMAGE_BASE = (import.meta.env.VITE_PRODUCT_IMAGE_BASE_URL || "https://rlubdcnqqtokvweztddx.supabase.co/storage/v1/object/public/product-images").replace(/\/+$/, "");
 
 const C = {
   bg: "#05050a", surface: "#09090f", card: "#0e0e16", border: "#181028", borderRed: "#2c1010",
