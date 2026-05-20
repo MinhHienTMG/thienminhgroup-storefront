@@ -12,6 +12,15 @@ const C = {
 const fmtV = (n = 0) => new Intl.NumberFormat("vi-VN").format(Number(n) || 0) + "đ";
 const cleanText = (txt = "") => String(txt).replaceAll("<br/>", "\n").replaceAll("<br>", "\n").replace(/<[^>]*>/g, "").trim();
 const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+const asciiSku = (value = "") => String(value)
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .replace(/Đ/g, "D")
+  .replace(/đ/g, "d")
+  .replace(/[^A-Za-z0-9._-]+/g, "-")
+  .replace(/-+/g, "-")
+  .replace(/^[-_.]+|[-_.]+$/g, "")
+  .toUpperCase();
 
 async function apiGet(path) {
   const res = await fetch(`${API_BASE}${path}`, { headers: { Accept: "application/json" } });
@@ -34,14 +43,15 @@ function imageCandidates(p) {
   if (!IMAGE_BASE) return [p.img].filter(Boolean);
   const sku = String(p.sku || "").trim();
   if (!sku) return [p.img].filter(Boolean);
-  const safe = encodeURIComponent(sku);
   const noColor = sku.replace(/-(XANH|XAM|ĐEN|DEN|DO|ĐỎ|VANG|VÀNG|OLIVE)$/i, "");
-  const bases = uniq([sku, noColor]).map((x) => encodeURIComponent(x));
+  const ascii = asciiSku(sku);
+  const asciiNoColor = asciiSku(noColor);
+  const bases = uniq([sku, noColor, ascii, asciiNoColor]).map((x) => encodeURIComponent(x));
   const files = [];
   for (const b of bases) {
-    files.push(`${IMAGE_BASE}/${b}.jpg`, `${IMAGE_BASE}/${b}.png`, `${IMAGE_BASE}/${b}_NET.jpg`, `${IMAGE_BASE}/${b}_NET.png`, `${IMAGE_BASE}/${b}_02.png`, `${IMAGE_BASE}/${b}_02.jpg`);
+    files.push(`${IMAGE_BASE}/${b}.jpg`, `${IMAGE_BASE}/${b}.jpeg`, `${IMAGE_BASE}/${b}.png`, `${IMAGE_BASE}/${b}_NET.jpg`, `${IMAGE_BASE}/${b}_NET.png`, `${IMAGE_BASE}/${b}_02.png`, `${IMAGE_BASE}/${b}_02.jpg`);
   }
-  return uniq([p.img, ...files, `${IMAGE_BASE}/${safe}.jpeg`]);
+  return uniq([p.img, ...files]);
 }
 
 function ProductImage({ p }) {
