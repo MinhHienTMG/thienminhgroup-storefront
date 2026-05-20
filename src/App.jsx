@@ -266,9 +266,8 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "flex-start" }}>
             <Sidebar cats={cats} selected={cat} setSelected={setCat} />
             <section style={{ flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "flex-start", alignItems: "center", marginBottom: 14 }}>
                 <div style={{ color: C.mutedL, fontSize: 13 }}>{shown.length} sản phẩm {cat !== "all" ? `trong ${cat}` : ""}</div>
-                <div style={{ color: C.green, fontSize: 12 }}>API: {API_BASE}</div>
               </div>
               {!shown.length ? <div style={{ padding: 50, textAlign: "center", color: C.muted, background: C.card, borderRadius: 16 }}>Không tìm thấy sản phẩm</div> : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 14 }}>
