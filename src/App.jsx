@@ -33,7 +33,7 @@ const CUSTOMER_CATEGORY_ORDER = [
 ];
 
 const C = {
-  page: "#f4f5f7",
+  page: "#101419",
   white: "#ffffff",
   ink: "#171717",
   text: "#2b2b2f",
@@ -202,6 +202,7 @@ function effectStyle(settings) {
 
 const EFFECT_STYLE_CSS = `
   .effect-surface .topbar,.effect-surface .site-header,.effect-surface .nav-row,.effect-surface .premium-hero,.effect-surface .commerce-stage{position:relative;isolation:isolate}
+  .effect-surface{min-height:100vh;background:radial-gradient(circle at 0% 14%,rgba(215,25,32,.24),transparent 28%),radial-gradient(circle at 100% 18%,rgba(8,116,67,.24),transparent 32%),linear-gradient(180deg,#12171d 0,#161b20 36%,#101419 100%)}
   .effect-surface .topbar{overflow:hidden;background:linear-gradient(90deg,var(--fx-top-a),var(--fx-top-b) 62%,var(--fx-top-a));box-shadow:inset 0 -1px rgba(255,255,255,.16)}
   .effect-surface .topbar:before{content:"";position:absolute;inset:-90% -20%;z-index:0;background:linear-gradient(112deg,transparent 35%,rgba(255,255,255,.26) 47%,transparent 59%);transform:translateX(-42%);opacity:calc(var(--fx-enabled) * var(--fx-intensity));animation:fx-sheen var(--fx-speed) linear infinite}
   .effect-surface .topbar-inner{position:relative;z-index:1}
@@ -213,10 +214,10 @@ const EFFECT_STYLE_CSS = `
   .effect-surface .nav-row{overflow:hidden;background-image:linear-gradient(180deg,rgba(255,255,255,.9),rgba(255,245,245,.82)),url("/images/effects/dekton-header-panel.webp");background-size:cover;background-position:center bottom;box-shadow:0 1px rgba(215,25,32,.05)}
   .effect-surface .nav-row:before{content:"";position:absolute;inset:0;z-index:0;background:repeating-linear-gradient(135deg,rgba(215,25,32,.055) 0 1px,transparent 1px 18px),linear-gradient(90deg,transparent,rgba(8,116,67,.055),transparent);opacity:calc(var(--fx-enabled) * var(--fx-intensity) * .62)}
   .effect-surface .nav-row .wrap{position:relative;z-index:1}
-  .effect-surface .commerce-stage{overflow:hidden;padding-bottom:34px;background:#f3f4f7}
-  .effect-surface .commerce-stage:before{content:"";position:absolute;inset:0 -8% -190px;z-index:-2;background:radial-gradient(circle at 18% 12%,rgba(215,25,32,.16),transparent 28%),radial-gradient(circle at 78% 18%,rgba(8,116,67,.16),transparent 34%),linear-gradient(120deg,rgba(255,255,255,.9),rgba(244,245,247,.62) 42%,rgba(255,255,255,.82));opacity:calc(var(--fx-enabled) * .86);pointer-events:none}
-  .effect-surface .commerce-stage:after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.36) 40%,rgba(244,245,247,.76) 100%),linear-gradient(115deg,transparent 0 44%,rgba(215,25,32,.06) 44% 45%,transparent 45% 100%),linear-gradient(245deg,transparent 0 56%,rgba(8,116,67,.06) 56% 57%,transparent 57% 100%);pointer-events:none}
-  .effect-surface .premium-hero{overflow:hidden;margin-top:18px;margin-bottom:20px;padding-top:28px;padding-bottom:30px;border-radius:18px;background-image:linear-gradient(90deg,rgba(8,10,12,.86),rgba(21,4,6,.7) 48%,rgba(3,36,23,.62)),var(--fx-stage-image);background-repeat:no-repeat;background-size:cover;background-position:center;box-shadow:0 24px 70px rgba(12,14,18,.18),inset 0 0 0 1px rgba(255,255,255,.12)}
+  .effect-surface .commerce-stage{overflow:hidden;padding-bottom:40px;background:radial-gradient(circle at -8% 8%,rgba(215,25,32,.26),transparent 28%),radial-gradient(circle at 108% 12%,rgba(18,170,115,.22),transparent 32%),linear-gradient(180deg,#11171d 0,#171b20 22%,#101419 100%)}
+  .effect-surface .commerce-stage:before{content:"";position:absolute;inset:0 -8% -190px;z-index:-2;background:linear-gradient(90deg,rgba(215,25,32,.08),transparent 18%,transparent 82%,rgba(8,116,67,.1)),radial-gradient(circle at 18% 12%,rgba(215,25,32,.18),transparent 28%),radial-gradient(circle at 78% 18%,rgba(45,195,255,.14),transparent 34%);opacity:calc(var(--fx-enabled) * .94);pointer-events:none}
+  .effect-surface .commerce-stage:after{content:"";position:absolute;inset:0;z-index:-1;background:repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,transparent 1px 92px),repeating-linear-gradient(0deg,rgba(255,255,255,.024) 0 1px,transparent 1px 72px),linear-gradient(115deg,transparent 0 44%,rgba(215,25,32,.08) 44% 45%,transparent 45% 100%),linear-gradient(245deg,transparent 0 56%,rgba(8,116,67,.08) 56% 57%,transparent 57% 100%);pointer-events:none}
+  .effect-surface .premium-hero{overflow:hidden;margin-top:18px;margin-bottom:20px;padding-top:28px;padding-bottom:30px;border-radius:18px;background-image:linear-gradient(90deg,rgba(8,10,12,.74),rgba(21,4,6,.5) 48%,rgba(3,36,23,.42)),var(--fx-stage-image);background-repeat:no-repeat;background-size:cover;background-position:center;box-shadow:0 28px 80px rgba(0,0,0,.36),inset 0 0 0 1px rgba(255,255,255,.14)}
   .effect-surface .premium-hero:before{content:"";position:absolute;inset:0;z-index:0;background:radial-gradient(circle at 18% 24%,rgba(255,126,40,.28),transparent 24%),radial-gradient(circle at 74% 18%,rgba(45,195,255,.24),transparent 28%),linear-gradient(115deg,rgba(215,25,32,.26),transparent 34%,rgba(8,116,67,.2) 72%,transparent);opacity:calc(var(--fx-enabled) * var(--fx-intensity));animation:fx-pan calc(var(--fx-speed) * 1.3) ease-in-out infinite;pointer-events:none}
   .effect-surface .premium-hero:after{content:"";position:absolute;inset:0;z-index:0;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.16) 70%,rgba(255,255,255,.28));pointer-events:none}
   .effect-surface .premium-hero>.hero-grid,.effect-surface .premium-hero>.trust-grid{position:relative;z-index:1}
@@ -227,17 +228,20 @@ const EFFECT_STYLE_CSS = `
   .effect-surface .trust-grid div{background:rgba(255,255,255,.92);backdrop-filter:blur(12px);box-shadow:0 18px 44px rgba(0,0,0,.16)}
   .effect-surface .promo-tabs a{background:rgba(255,255,255,.9);backdrop-filter:blur(10px);box-shadow:0 12px 30px rgba(19,23,31,.055)}
   .effect-surface .promo-tabs a:first-child{background:var(--fx-accent);border-color:var(--fx-accent);color:white}
-  .effect-surface .product-section{position:relative;margin-top:24px;padding:28px 20px 34px;border-radius:18px;background-color:rgba(255,255,255,.72);background-image:linear-gradient(90deg,rgba(255,255,255,.92),rgba(255,255,255,.56) 54%,rgba(255,255,255,.82)),url("/images/effects/dekton-section-products.webp");background-repeat:no-repeat;background-size:cover;background-position:center;box-shadow:0 18px 48px rgba(17,21,28,.08),inset 0 0 0 1px rgba(255,255,255,.8)}
-  .effect-surface #flash-sale{background-image:linear-gradient(90deg,rgba(255,255,255,.92),rgba(255,255,255,.5) 54%,rgba(255,255,255,.82)),url("/images/effects/dekton-section-flash.webp")}
-  .effect-surface #new-arrivals{background-image:linear-gradient(90deg,rgba(255,255,255,.92),rgba(255,255,255,.5) 54%,rgba(255,255,255,.82)),url("/images/effects/dekton-section-new.webp")}
-  .effect-surface #featured{background-image:linear-gradient(90deg,rgba(255,255,255,.92),rgba(255,255,255,.52) 54%,rgba(255,255,255,.84)),url("/images/effects/dekton-section-featured.webp")}
+  .effect-surface .product-section{position:relative;margin-top:30px;padding:30px 20px 36px;border-radius:18px;background-color:#111820;background-image:linear-gradient(90deg,rgba(8,11,15,.68) 0%,rgba(8,11,15,.42) 36%,rgba(8,11,15,.08) 68%,rgba(8,11,15,.34) 100%),url("/images/effects/dekton-section-products.webp");background-repeat:no-repeat;background-size:cover;background-position:center;box-shadow:0 30px 88px rgba(0,0,0,.34),inset 0 0 0 1px rgba(255,255,255,.16)}
+  .effect-surface #flash-sale{background-image:linear-gradient(90deg,rgba(8,11,15,.72) 0%,rgba(48,8,10,.42) 36%,rgba(8,11,15,.06) 68%,rgba(8,11,15,.34) 100%),url("/images/effects/dekton-section-flash.webp")}
+  .effect-surface #new-arrivals{background-image:linear-gradient(90deg,rgba(8,11,15,.72) 0%,rgba(5,43,34,.38) 36%,rgba(8,11,15,.06) 68%,rgba(8,11,15,.34) 100%),url("/images/effects/dekton-section-new.webp")}
+  .effect-surface #featured{background-image:linear-gradient(90deg,rgba(8,11,15,.72) 0%,rgba(54,34,5,.38) 36%,rgba(8,11,15,.06) 68%,rgba(8,11,15,.34) 100%),url("/images/effects/dekton-section-featured.webp")}
   .effect-surface .product-section .section-head,.effect-surface .product-section .product-grid{position:relative;z-index:1}
+  .effect-surface .product-section .section-head h2{color:#fff;text-shadow:0 2px 18px rgba(0,0,0,.42)}
+  .effect-surface .product-section .section-head small{color:rgba(255,255,255,.76)}
+  .effect-surface .product-section .section-head span{color:#ff3b42;text-shadow:0 2px 14px rgba(0,0,0,.44)}
   @keyframes fx-sheen{0%{transform:translateX(-46%) rotate(0deg)}100%{transform:translateX(46%) rotate(0deg)}}
   @keyframes fx-pan{0%,100%{background-position:0% 50%,0% 50%,0 0}50%{background-position:100% 50%,100% 50%,0 18px}}
   @keyframes fx-rotate{to{transform:rotate(360deg)}}
   @keyframes fx-stage-drift{0%,100%{background-position:center}50%{background-position:center 16px}}
   @media (prefers-reduced-motion:reduce){.effect-surface *,.effect-surface *:before,.effect-surface *:after{animation:none!important;transition:none!important}}
-  @media(max-width:560px){.effect-surface .topbar:before{display:none}.effect-surface .commerce-stage{padding-bottom:20px}.effect-surface .commerce-stage:before{inset:0 -52% -120px;opacity:calc(var(--fx-enabled) * .76)}.effect-surface .commerce-stage:after{background:linear-gradient(90deg,rgba(255,255,255,.88),rgba(255,255,255,.42),rgba(255,255,255,.8)),linear-gradient(180deg,rgba(255,255,255,.1),rgba(255,255,255,.62) 46%,rgba(244,245,247,.9) 100%)}.effect-surface .premium-hero{margin-top:12px;margin-bottom:16px;padding-top:16px;padding-bottom:18px;border-radius:14px;background-size:cover;background-position:center}.effect-surface .product-section{margin-top:18px;padding:20px 16px 24px;border-radius:14px;background-position:center top}.effect-surface .site-header:before{background:linear-gradient(120deg,rgba(215,25,32,.05),transparent)}}
+  @media(max-width:560px){.effect-surface .topbar:before{display:none}.effect-surface .commerce-stage{padding-bottom:22px;background:linear-gradient(180deg,#11171d 0,#161b20 34%,#101419 100%)}.effect-surface .commerce-stage:before{inset:0 -52% -120px;opacity:calc(var(--fx-enabled) * .76)}.effect-surface .premium-hero{margin-top:12px;margin-bottom:16px;padding-top:16px;padding-bottom:18px;border-radius:14px;background-size:cover;background-position:center}.effect-surface .product-section{margin-top:20px;padding:20px 16px 24px;border-radius:14px;background-position:center top}.effect-surface .site-header:before{background:linear-gradient(120deg,rgba(215,25,32,.05),transparent)}}
 `;
 
 function productImageAliases(p) {
