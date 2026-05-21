@@ -19,8 +19,8 @@ The API/dashboard should own persistence and editing.
 | `accent` | color | `#d71920` | Màu nhấn | DEKTON red. |
 | `gold` | color | `#d89513` | Màu phụ | Warm highlight. |
 | `stageMode` | string | `industrial-ai` | Kiểu nền dài | `industrial-ai`, `image`, or `none`. |
-| `stageImageUrl` | string | `/images/effects/dekton-ai-stage.svg` | Ảnh nền chiến dịch | Canva/Photoshop/AI asset, lightly blurred by storefront. |
-| `stageOpacity` | number | `0.72` | Độ rõ nền dài | Clamp 0-1. |
+| `stageImageUrl` | string | `/images/effects/dekton-hero-campaign.webp` | Ảnh nền hero | Canva/Photoshop/AI campaign asset. |
+| `stageOpacity` | number | `0.96` | Độ rõ nền | Clamp 0-1. |
 | `stageBlur` | number | `0` | Độ mờ ảnh nền | Pixel blur, clamp 0-10. |
 
 Example public settings response:
@@ -42,20 +42,21 @@ Example public settings response:
     "accent": "#d71920",
     "gold": "#d89513",
     "stageMode": "industrial-ai",
-    "stageImageUrl": "/images/effects/dekton-ai-stage.svg",
-    "stageOpacity": 0.72,
+    "stageImageUrl": "/images/effects/dekton-hero-campaign.webp",
+    "stageOpacity": 0.96,
     "stageBlur": 0
   }
 }
 ```
 
-Recommended asset direction for `stageImageUrl`:
+Recommended asset direction for section images:
 
 - 16:9 or 21:9 wide background.
 - DEKTON power tools in an energetic industrial/city or workshop scene.
 - No important text inside the image, because storefront overlays product cards on top.
 - Keep subject on the right or upper area, with clean space in the center/left.
 - Export WebP/JPEG around 1800-2400 px wide and under 700 KB when possible.
+- Split by storefront zone: header panel, hero campaign, flash sale, new arrivals, featured products, and all products.
 
 Production asset workflow:
 
