@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import productImageManifest from "./productImageManifest.json";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? "" : "https://web-production-7d03f.up.railway.app");
 const IMAGE_BASE = (import.meta.env.VITE_PRODUCT_IMAGE_BASE_URL || "https://rlubdcnqqtokvweztddx.supabase.co/storage/v1/object/public/product-images").replace(/\/+$/, "");
@@ -6,6 +7,8 @@ const LOCAL_PRODUCT_IMAGE_BASE = "/images/products/upload_bucket";
 const SERVICE_FALLBACK_IMAGE = "/images/products/dekton-service-fallback.svg";
 const PRODUCT_COLOR_SUFFIXES = ["XAM", "XXA", "OLV", "OLIVE", "XQD", "XANH", "BAC", "BE", "XCA", "CAM", "DO", "DEN", "TRANG"];
 const PRODUCT_IMAGE_VARIANTS = ["", ...PRODUCT_COLOR_SUFFIXES.map((suffix) => `-${suffix}`)];
+const PRODUCT_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
+const LOCAL_PRODUCT_IMAGE_SET = new Set(productImageManifest.map((name) => String(name).toUpperCase()));
 
 const CUSTOMER_CATEGORY_ORDER = [
   "Máy Dùng Điện",
@@ -255,8 +258,8 @@ function productImageAliases(p) {
   return [...new Set(aliases.filter(Boolean))];
 }
 
-function imageCandidates(p) {
-  const apiImages = [
+function explicitProductImages(p) {
+  return [
     p.img,
     p.image,
     p.imageUrl,
@@ -267,22 +270,39 @@ function imageCandidates(p) {
     p.photo,
     p.images,
   ].flatMap(imageValues).map(normalizeImageUrl).filter(Boolean);
-  const skuAliases = productImageAliases(p);
-  const isService = normalizeSkuForImage(p.sku).startsWith("SCDEKTON") || String(p.cat || "").toUpperCase().includes("SỬA CHỮA");
-  if (isService) return [...new Set([...apiImages, SERVICE_FALLBACK_IMAGE])];
-  if (!skuAliases.length) return [...new Set(apiImages)];
-  const extensions = ["jpg", "jpeg", "png", "webp"];
-  const skuNames = skuAliases.flatMap((sku) => PRODUCT_IMAGE_VARIANTS.map((suffix) => `${encodeURIComponent(sku)}${suffix}`));
-  const localImages = skuNames.flatMap((name) => extensions.map((ext) => `${LOCAL_PRODUCT_IMAGE_BASE}/${name}.${ext}`));
-  const configuredImages = IMAGE_BASE ? skuNames.flatMap((name) => extensions.map((ext) => `${IMAGE_BASE}/${name}.${ext}`)) : [];
-  return [...new Set([...apiImages, ...localImages, ...configuredImages])];
 }
 
-function ProductImage({ p }) {
+function isServiceProduct(p) {
+  return normalizeSkuForImage(p.sku).startsWith("SCDEKTON") || String(p.cat || "").toUpperCase().includes("SỬA CHỮA");
+}
+
+function localManifestImageUrls(p) {
+  const skuAliases = productImageAliases(p);
+  const skuNames = skuAliases.flatMap((sku) => PRODUCT_IMAGE_VARIANTS.map((suffix) => `${sku}${suffix}`));
+  return skuNames.flatMap((name) => PRODUCT_IMAGE_EXTENSIONS
+    .map((ext) => `${name}.${ext}`)
+    .filter((fileName) => LOCAL_PRODUCT_IMAGE_SET.has(fileName.toUpperCase()))
+    .map((fileName) => `${LOCAL_PRODUCT_IMAGE_BASE}/${encodeURIComponent(fileName)}`));
+}
+
+function productReadyForStorefront(p) {
+  return isServiceProduct(p) || explicitProductImages(p).length > 0 || localManifestImageUrls(p).length > 0;
+}
+
+function imageCandidates(p) {
+  const apiImages = explicitProductImages(p);
+  if (isServiceProduct(p)) return [...new Set([...apiImages, SERVICE_FALLBACK_IMAGE])];
+  return [...new Set([...apiImages, ...localManifestImageUrls(p)])];
+}
+
+function ProductImage({ p, onMissingImage }) {
   const candidates = imageCandidates(p);
   const [idx, setIdx] = useState(0);
   useEffect(() => setIdx(0), [p.sku]);
-  if (!candidates.length || idx >= candidates.length) return <div className="product-placeholder"><strong>DEKTON</strong><span>Ảnh đang cập nhật</span></div>;
+  useEffect(() => {
+    if (candidates.length && idx >= candidates.length) onMissingImage?.();
+  }, [candidates.length, idx, onMissingImage]);
+  if (!candidates.length || idx >= candidates.length) return null;
   return <img src={candidates[idx]} alt={p.name} onError={() => setIdx((i) => i + 1)} className="product-img" />;
 }
 
@@ -374,9 +394,12 @@ function PremiumHero({ banners, settings }) {
 }
 
 function ProductCard({ p, onOrder }) {
+  const [imageMissing, setImageMissing] = useState(false);
+  useEffect(() => setImageMissing(false), [p.sku]);
+  if (imageMissing) return null;
   return <article className="product-card">
     <div className="product-media">
-      <ProductImage p={p} />
+      <ProductImage p={p} onMissingImage={() => setImageMissing(true)} />
       {p.hot && <span className="hot-tag">HOT</span>}
     </div>
     <div className="product-body">
@@ -525,15 +548,16 @@ export default function App() {
     const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash}`;
     window.history.replaceState(null, "", nextUrl);
   }, [cat, search]);
-  const cats = useMemo(() => [...new Set(products.map(customerCategoryPath))].sort(categorySort), [products]);
+  const publishableProducts = useMemo(() => products.filter(productReadyForStorefront), [products]);
+  const cats = useMemo(() => [...new Set(publishableProducts.map(customerCategoryPath))].sort(categorySort), [publishableProducts]);
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return products.filter((p) => {
+    return publishableProducts.filter((p) => {
       const path = customerCategoryPath(p);
       const inCategory = cat === "all" || path === cat || path.startsWith(`${cat} > `);
       return inCategory && (!q || `${p.name} ${p.sku} ${p.desc}`.toLowerCase().includes(q));
     });
-  }, [products, cat, search]);
+  }, [publishableProducts, cat, search]);
   const showroomProducts = useMemo(() => cat === "all" ? shown.filter((p) => categoryMain(customerCategoryPath(p)) !== "Dịch Vụ") : shown, [shown, cat]);
   const flashSale = useMemo(() => {
     const byPromoSku = PROMO_SKUS
