@@ -689,6 +689,12 @@ function titleCaseName(s) {
     .split(" ").map((w) => w ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
 }
 
+// Viết hoa chữ đầu mỗi từ, GIỮ NGUYÊN phần còn lại (cho tên đường: "45/68 cao lỗ" -> "45/68 Cao Lỗ", không phá QL1A).
+function capWords(s) {
+  return String(s || "").replace(/\s+/g, " ").trim()
+    .split(" ").map((w) => w ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
+}
+
 // Ô chọn có tìm kiếm gõ-để-lọc (không dấu). Giá trị chỉ hợp lệ khi khách chọn 1 mục.
 function SearchSelect({ value, onChange, options, placeholder, disabled }) {
   const [q, setQ] = useState(value || "");
@@ -733,7 +739,7 @@ function OrderModal({ product, onClose }) {
     const qty = Math.max(1, Number(form.qty) || 1);
     const name = titleCaseName(form.name);
     const phone = normalizePhone(form.phone);
-    const street = form.street.trim(), ward = form.ward.trim(), province = form.province.trim();
+    const street = capWords(form.street), ward = form.ward.trim(), province = form.province.trim();
     if (!name) { setStatus({ tone: "error", text: "Vui lòng nhập họ tên người nhận." }); return; }
     if (!/^0\d{9}$/.test(phone)) { setStatus({ tone: "error", text: "Số điện thoại chưa đúng — cần 10 số, bắt đầu bằng 0." }); return; }
     if (!street) { setStatus({ tone: "error", text: "Vui lòng nhập số nhà + tên đường." }); return; }
@@ -788,7 +794,7 @@ function OrderModal({ product, onClose }) {
       <div className="modal-title"><div><h3>Đặt hàng</h3><p>{product.name}</p></div><button onClick={onClose}>×</button></div>
       <div className="field"><label>Họ tên người nhận</label><input value={form.name} placeholder="Ví dụ: Nguyễn Văn An" style={inputStyle()} onChange={(e) => upd("name", e.target.value)} onBlur={() => upd("name", titleCaseName(form.name))} /></div>
       {tf("phone", "Số điện thoại", "Ví dụ: 0901 234 567")}
-      {tf("street", "① Số nhà + tên đường", "Ví dụ: 25 Lê Lợi")}
+      <div className="field"><label>① Số nhà + tên đường</label><input value={form.street} placeholder="Ví dụ: 25 Lê Lợi" style={inputStyle()} onChange={(e) => upd("street", e.target.value)} onBlur={() => upd("street", capWords(form.street))} /></div>
       {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><SearchSelect value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v, ward: "" }))} options={VN_PROVINCES.map((p) => p.name)} placeholder="Gõ để tìm — vd: hồ chí, hà nội" /></div>}
       {hasProvince && <div className="field"><label>③ Phường / Xã / Thị trấn</label><SearchSelect value={form.ward} onChange={(v) => upd("ward", v)} options={wardOptions} placeholder={wardOptions.length ? "Gõ để tìm — vd: chánh hưng" : "Đang tải phường/xã..."} disabled={!wardOptions.length} /></div>}
       {addressPreview && <div className="addr-preview">📍 Giao tới: {addressPreview}</div>}
