@@ -695,8 +695,8 @@ function OrderModal({ product, onClose }) {
     if (!name) { setStatus({ tone: "error", text: "Vui lòng nhập họ tên người nhận." }); return; }
     if (!/^0\d{9}$/.test(phone)) { setStatus({ tone: "error", text: "Số điện thoại chưa đúng — cần 10 số, bắt đầu bằng 0." }); return; }
     if (!street) { setStatus({ tone: "error", text: "Vui lòng nhập số nhà + tên đường." }); return; }
-    if (!ward) { setStatus({ tone: "error", text: "Vui lòng nhập phường / xã / thị trấn." }); return; }
     if (!province) { setStatus({ tone: "error", text: "Vui lòng chọn tỉnh / thành phố." }); return; }
+    if (!ward) { setStatus({ tone: "error", text: "Vui lòng nhập phường / xã / thị trấn." }); return; }
     const provinceId = (VN_PROVINCES.find((p) => p.name === province) || {}).id || null;
     const address = composeVnAddress({ street, ward, province });
     const comboItems = Array.isArray(product.items)
@@ -738,17 +738,17 @@ function OrderModal({ product, onClose }) {
     } catch (e) { setStatus({ tone: "error", text: "Chưa gửi được đơn. Vui lòng thử lại hoặc gọi hotline để được hỗ trợ." }); }
   };
   if (!product) return null;
-  const textFields = [
-    ["name", "Họ tên người nhận", "Ví dụ: Trần Minh Hiền"],
-    ["phone", "Số điện thoại", "Ví dụ: 0909418151"],
-    ["street", "Số nhà + tên đường", "Ví dụ: 108 Võ Văn Kiệt"],
-    ["ward", "Phường / Xã / Thị trấn", "Ví dụ: Phường Bến Thành"],
-  ];
+  const hasStreet = form.street.trim().length > 0;
+  const hasProvince = form.province.length > 0;
+  const tf = (k, label, ph) => <div key={k} className="field"><label>{label}</label><input value={form[k]} placeholder={ph} inputMode={k === "phone" ? "numeric" : undefined} onChange={(e) => upd(k, e.target.value)} style={inputStyle()} /></div>;
   return <div className="modal-backdrop" onClick={onClose}>
     <div className="modal" onClick={(e) => e.stopPropagation()}>
       <div className="modal-title"><div><h3>Đặt hàng</h3><p>{product.name}</p></div><button onClick={onClose}>×</button></div>
-      {textFields.map(([k, label, ph]) => <div key={k} className="field"><label>{label}</label><input value={form[k]} placeholder={ph} inputMode={k === "phone" ? "numeric" : undefined} onChange={(e) => upd(k, e.target.value)} style={inputStyle()} /></div>)}
-      <div className="field"><label>Tỉnh / Thành phố</label><select value={form.province} onChange={(e) => upd("province", e.target.value)} style={inputStyle()}><option value="">— Chọn tỉnh / thành phố —</option>{VN_PROVINCES.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
+      {tf("name", "Họ tên người nhận", "Ví dụ: Trần Minh Hiền")}
+      {tf("phone", "Số điện thoại", "Ví dụ: 0909418151")}
+      {tf("street", "① Số nhà + tên đường", "Ví dụ: 108 Võ Văn Kiệt")}
+      {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><select value={form.province} onChange={(e) => upd("province", e.target.value)} style={inputStyle()}><option value="">— Chọn tỉnh / thành phố —</option>{VN_PROVINCES.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>}
+      {hasProvince && tf("ward", "③ Phường / Xã / Thị trấn", "Ví dụ: Phường Bến Thành")}
       {addressPreview && <div className="addr-preview">📍 Giao tới: {addressPreview}</div>}
       <div className="field"><label>Số lượng</label><input type="number" min="1" value={form.qty} onChange={(e) => upd("qty", e.target.value)} style={inputStyle()} /></div>
       <div className="total"><span>Tạm tính</span><strong>{fmtV(total)}</strong></div>
