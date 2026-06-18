@@ -630,6 +630,44 @@ function HotlineModal({ contacts, onClose }) {
 
 const ORDER_CHANNEL = "website thienminhgroup.net";
 
+// Tỉnh/thành 2 cấp (sau sáp nhập 2025) kèm KiotViet locationId — để KiotViet tự điền ô Khu vực.
+const VN_PROVINCES = [
+  { id: 770, name: "Thành phố Hồ Chí Minh" },
+  { id: 743, name: "Thành phố Hà Nội" },
+  { id: 763, name: "Thành phố Đà Nẵng" },
+  { id: 755, name: "Thành phố Hải Phòng" },
+  { id: 775, name: "Thành phố Cần Thơ" },
+  { id: 762, name: "Thành phố Huế" },
+  { id: 769, name: "Thành phố Đồng Nai" },
+  { id: 774, name: "Tỉnh An Giang" },
+  { id: 753, name: "Tỉnh Bắc Ninh" },
+  { id: 776, name: "Tỉnh Cà Mau" },
+  { id: 744, name: "Tỉnh Cao Bằng" },
+  { id: 767, name: "Tỉnh Đắk Lắk" },
+  { id: 746, name: "Tỉnh Điện Biên" },
+  { id: 772, name: "Tỉnh Đồng Tháp" },
+  { id: 765, name: "Tỉnh Gia Lai" },
+  { id: 760, name: "Tỉnh Hà Tĩnh" },
+  { id: 756, name: "Tỉnh Hưng Yên" },
+  { id: 766, name: "Tỉnh Khánh Hòa" },
+  { id: 747, name: "Tỉnh Lai Châu" },
+  { id: 768, name: "Tỉnh Lâm Đồng" },
+  { id: 751, name: "Tỉnh Lạng Sơn" },
+  { id: 749, name: "Tỉnh Lào Cai" },
+  { id: 759, name: "Tỉnh Nghệ An" },
+  { id: 757, name: "Tỉnh Ninh Bình" },
+  { id: 754, name: "Tỉnh Phú Thọ" },
+  { id: 764, name: "Tỉnh Quảng Ngãi" },
+  { id: 752, name: "Tỉnh Quảng Ninh" },
+  { id: 761, name: "Tỉnh Quảng Trị" },
+  { id: 748, name: "Tỉnh Sơn La" },
+  { id: 750, name: "Tỉnh Thái Nguyên" },
+  { id: 758, name: "Tỉnh Thanh Hóa" },
+  { id: 771, name: "Tỉnh Tây Ninh" },
+  { id: 745, name: "Tỉnh Tuyên Quang" },
+  { id: 773, name: "Tỉnh Vĩnh Long" },
+];
+
 function composeVnAddress(f) {
   return [f.street, f.ward, f.province, "Việt Nam"]
     .map((part) => String(part || "").trim())
@@ -658,7 +696,8 @@ function OrderModal({ product, onClose }) {
     if (!/^0\d{9}$/.test(phone)) { setStatus({ tone: "error", text: "Số điện thoại chưa đúng — cần 10 số, bắt đầu bằng 0." }); return; }
     if (!street) { setStatus({ tone: "error", text: "Vui lòng nhập số nhà + tên đường." }); return; }
     if (!ward) { setStatus({ tone: "error", text: "Vui lòng nhập phường / xã / thị trấn." }); return; }
-    if (!province) { setStatus({ tone: "error", text: "Vui lòng nhập tỉnh / thành phố." }); return; }
+    if (!province) { setStatus({ tone: "error", text: "Vui lòng chọn tỉnh / thành phố." }); return; }
+    const provinceId = (VN_PROVINCES.find((p) => p.name === province) || {}).id || null;
     const address = composeVnAddress({ street, ward, province });
     const comboItems = Array.isArray(product.items)
       ? product.items.map((item) => ({
@@ -674,6 +713,7 @@ function OrderModal({ product, onClose }) {
       address_street: street,
       address_ward: ward,
       address_province: province,
+      address_province_id: provinceId,
       address_country: "Việt Nam",
       channel: ORDER_CHANNEL,
       source: "website",
@@ -698,17 +738,17 @@ function OrderModal({ product, onClose }) {
     } catch (e) { setStatus({ tone: "error", text: "Chưa gửi được đơn. Vui lòng thử lại hoặc gọi hotline để được hỗ trợ." }); }
   };
   if (!product) return null;
-  const addressFields = [
+  const textFields = [
     ["name", "Họ tên người nhận", "Ví dụ: Trần Minh Hiền"],
     ["phone", "Số điện thoại", "Ví dụ: 0909418151"],
     ["street", "Số nhà + tên đường", "Ví dụ: 108 Võ Văn Kiệt"],
     ["ward", "Phường / Xã / Thị trấn", "Ví dụ: Phường Bến Thành"],
-    ["province", "Tỉnh / Thành phố", "Ví dụ: TP. Hồ Chí Minh"],
   ];
   return <div className="modal-backdrop" onClick={onClose}>
     <div className="modal" onClick={(e) => e.stopPropagation()}>
       <div className="modal-title"><div><h3>Đặt hàng</h3><p>{product.name}</p></div><button onClick={onClose}>×</button></div>
-      {addressFields.map(([k, label, ph]) => <div key={k} className="field"><label>{label}</label><input value={form[k]} placeholder={ph} inputMode={k === "phone" ? "numeric" : undefined} onChange={(e) => upd(k, e.target.value)} style={inputStyle()} /></div>)}
+      {textFields.map(([k, label, ph]) => <div key={k} className="field"><label>{label}</label><input value={form[k]} placeholder={ph} inputMode={k === "phone" ? "numeric" : undefined} onChange={(e) => upd(k, e.target.value)} style={inputStyle()} /></div>)}
+      <div className="field"><label>Tỉnh / Thành phố</label><select value={form.province} onChange={(e) => upd("province", e.target.value)} style={inputStyle()}><option value="">— Chọn tỉnh / thành phố —</option>{VN_PROVINCES.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
       {addressPreview && <div className="addr-preview">📍 Giao tới: {addressPreview}</div>}
       <div className="field"><label>Số lượng</label><input type="number" min="1" value={form.qty} onChange={(e) => upd("qty", e.target.value)} style={inputStyle()} /></div>
       <div className="total"><span>Tạm tính</span><strong>{fmtV(total)}</strong></div>
