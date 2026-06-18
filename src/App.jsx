@@ -683,6 +683,12 @@ function normVi(s) {
   return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase().trim();
 }
 
+// Viết hoa chữ đầu mỗi từ trong tên (tôn trọng tên khách): "minh hiền" -> "Minh Hiền".
+function titleCaseName(s) {
+  return String(s || "").toLowerCase().replace(/\s+/g, " ").trim()
+    .split(" ").map((w) => w ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
+}
+
 // Ô chọn có tìm kiếm gõ-để-lọc (không dấu). Giá trị chỉ hợp lệ khi khách chọn 1 mục.
 function SearchSelect({ value, onChange, options, placeholder, disabled }) {
   const [q, setQ] = useState(value || "");
@@ -725,7 +731,7 @@ function OrderModal({ product, onClose }) {
   const addressPreview = composeVnAddress(form);
   const submit = async () => {
     const qty = Math.max(1, Number(form.qty) || 1);
-    const name = form.name.trim();
+    const name = titleCaseName(form.name);
     const phone = normalizePhone(form.phone);
     const street = form.street.trim(), ward = form.ward.trim(), province = form.province.trim();
     if (!name) { setStatus({ tone: "error", text: "Vui lòng nhập họ tên người nhận." }); return; }
@@ -780,7 +786,7 @@ function OrderModal({ product, onClose }) {
   return <div className="modal-backdrop" onClick={onClose}>
     <div className="modal" onClick={(e) => e.stopPropagation()}>
       <div className="modal-title"><div><h3>Đặt hàng</h3><p>{product.name}</p></div><button onClick={onClose}>×</button></div>
-      {tf("name", "Họ tên người nhận", "Ví dụ: Nguyễn Văn An")}
+      <div className="field"><label>Họ tên người nhận</label><input value={form.name} placeholder="Ví dụ: Nguyễn Văn An" style={inputStyle()} onChange={(e) => upd("name", e.target.value)} onBlur={() => upd("name", titleCaseName(form.name))} /></div>
       {tf("phone", "Số điện thoại", "Ví dụ: 0901 234 567")}
       {tf("street", "① Số nhà + tên đường", "Ví dụ: 25 Lê Lợi")}
       {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><SearchSelect value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v, ward: "" }))} options={VN_PROVINCES.map((p) => p.name)} placeholder="Gõ để tìm — vd: hồ chí, hà nội" /></div>}
