@@ -717,9 +717,12 @@ function SearchSelect({ value, onChange, options, placeholder, disabled }) {
   </div>;
 }
 
+const EMPTY_ORDER_FORM = { name: "", phone: "", street: "", ward: "", province: "", qty: 1, customerType: "individual", taxCode: "", companyName: "", companyAddress: "" };
+
 function OrderModal({ product, onClose }) {
-  const [form, setForm] = useState({ name: "", phone: "", street: "", ward: "", province: "", qty: 1 });
+  const [form, setForm] = useState(EMPTY_ORDER_FORM);
   const [status, setStatus] = useState(null);
+  const [taxLookup, setTaxLookup] = useState(null);
   const [wardOptions, setWardOptions] = useState([]);
   useEffect(() => {
     const prov = VN_PROVINCES.find((p) => p.name === form.province);
@@ -736,8 +739,8 @@ function OrderModal({ product, onClose }) {
   const [paused, setPaused] = useState(false);
   // Reset toàn bộ khi mở sản phẩm khác (component không remount giữa các lần mở).
   useEffect(() => {
-    setDone(null); setStatus(null); setShowContacts(false); setPaused(false);
-    setForm({ name: "", phone: "", street: "", ward: "", province: "", qty: 1 });
+    setDone(null); setStatus(null); setShowContacts(false); setPaused(false); setTaxLookup(null);
+    setForm(EMPTY_ORDER_FORM);
   }, [product?.sku]);
   // Đếm ngược tự đóng (chống khách bấm gửi nhiều lần). Dừng nếu khách mở danh bạ liên hệ.
   useEffect(() => {
@@ -750,6 +753,19 @@ function OrderModal({ product, onClose }) {
   const statusTone = status && typeof status === "object" ? status.tone : "";
   const total = (Number(product?.price) || 0) * (Number(form.qty) || 1);
   const upd = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const lookupTax = async () => {
+    const mst = String(form.taxCode || "").replace(/\D/g, "");
+    if (mst.length < 10) { setTaxLookup({ tone: "error", text: "Mã số thuế cần ít nhất 10 số." }); return; }
+    setTaxLookup("loading");
+    try {
+      const r = await apiGet(`/api/public/tax-lookup?code=${mst}`);
+      setForm((f) => ({ ...f, taxCode: r.tax_code || mst, companyName: r.name || "", companyAddress: r.address || "" }));
+      setTaxLookup({ tone: "ok", text: "Đã tìm thấy doanh nghiệp." });
+    } catch (e) {
+      setForm((f) => ({ ...f, companyName: "", companyAddress: "" }));
+      setTaxLookup({ tone: "error", text: "Không tìm thấy doanh nghiệp với mã số thuế này. Vui lòng kiểm tra lại." });
+    }
+  };
   const addressPreview = composeVnAddress(form);
   const submit = async () => {
     const qty = Math.max(1, Number(form.qty) || 1);
@@ -761,6 +777,12 @@ function OrderModal({ product, onClose }) {
     if (!street) { setStatus({ tone: "error", text: "Vui lòng nhập số nhà + tên đường." }); return; }
     if (!province) { setStatus({ tone: "error", text: "Vui lòng chọn tỉnh / thành phố." }); return; }
     if (!ward) { setStatus({ tone: "error", text: "Vui lòng nhập phường / xã / thị trấn." }); return; }
+    const isBusiness = form.customerType === "business";
+    const taxCode = String(form.taxCode || "").replace(/\D/g, "");
+    if (isBusiness) {
+      if (taxCode.length < 10) { setStatus({ tone: "error", text: "Vui lòng nhập mã số thuế (ít nhất 10 số) cho khách doanh nghiệp." }); return; }
+      if (!form.companyName.trim()) { setStatus({ tone: "error", text: "Vui lòng bấm \"Tra cứu\" để lấy tên công ty từ mã số thuế." }); return; }
+    }
     const provinceId = (VN_PROVINCES.find((p) => p.name === province) || {}).id || null;
     const address = composeVnAddress({ street, ward, province });
     const comboItems = Array.isArray(product.items)
@@ -786,7 +808,13 @@ function OrderModal({ product, onClose }) {
       product_name: product.name,
       product_sku: product.sku,
       total: (Number(product?.price) || 0) * qty,
+      customer_type: isBusiness ? "business" : "individual",
     };
+    if (isBusiness) {
+      payload.tax_code = taxCode;
+      payload.company_name = form.companyName.trim();
+      payload.company_address = form.companyAddress.trim();
+    }
     if (comboItems.length) payload.items = comboItems;
     setStatus("sending");
     try {
@@ -828,12 +856,25 @@ function OrderModal({ product, onClose }) {
   return <div className="modal-backdrop" onClick={onClose}>
     <div className="modal" onClick={(e) => e.stopPropagation()}>
       <div className="modal-title"><div><h3>Đặt hàng</h3><p>{product.name}</p></div><button onClick={onClose}>×</button></div>
-      <div className="field"><label>Họ tên người nhận</label><input value={form.name} placeholder="Ví dụ: Nguyễn Văn An" style={inputStyle()} onChange={(e) => upd("name", e.target.value)} onBlur={() => upd("name", titleCaseName(form.name))} /></div>
+      <div className="field"><label>Loại khách hàng</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          {[["individual", "Khách cá nhân"], ["business", "Doanh nghiệp / Hộ KD"]].map(([val, lbl]) => <button key={val} type="button" onClick={() => { upd("customerType", val); setTaxLookup(null); }} style={{ flex: 1, padding: "10px 8px", borderRadius: 8, cursor: "pointer", fontWeight: 600, border: `1px solid ${form.customerType === val ? C.red : C.line}`, background: form.customerType === val ? C.red : C.white, color: form.customerType === val ? C.white : C.text }}>{lbl}</button>)}
+        </div>
+      </div>
+      <div className="field"><label>{form.customerType === "business" ? "Họ tên người nhận hàng" : "Họ tên người nhận"}</label><input value={form.name} placeholder="Ví dụ: Nguyễn Văn An" style={inputStyle()} onChange={(e) => upd("name", e.target.value)} onBlur={() => upd("name", titleCaseName(form.name))} /></div>
       {tf("phone", "Số điện thoại", "Ví dụ: 0901 234 567")}
       <div className="field"><label>① Số nhà + tên đường</label><input value={form.street} placeholder="Ví dụ: 25 Lê Lợi" style={inputStyle()} onChange={(e) => upd("street", e.target.value)} onBlur={() => upd("street", capWords(form.street))} /></div>
       {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><SearchSelect value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v, ward: "" }))} options={VN_PROVINCES.map((p) => p.name)} placeholder="Gõ để tìm — vd: hồ chí, hà nội" /></div>}
       {hasProvince && <div className="field"><label>③ Phường / Xã / Thị trấn</label><SearchSelect value={form.ward} onChange={(v) => upd("ward", v)} options={wardOptions} placeholder={wardOptions.length ? "Gõ để tìm — vd: chánh hưng" : "Đang tải phường/xã..."} disabled={!wardOptions.length} /></div>}
       {addressPreview && <div className="addr-preview">📍 Giao tới: {addressPreview}</div>}
+      {form.customerType === "business" && <div className="field"><label>Mã số thuế (để xuất hóa đơn)</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={form.taxCode} inputMode="numeric" placeholder="Ví dụ: 0317809858" style={{ ...inputStyle(), flex: 1 }} onChange={(e) => { upd("taxCode", e.target.value); if (taxLookup) setTaxLookup(null); }} />
+          <button type="button" onClick={lookupTax} disabled={taxLookup === "loading"} style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, background: C.red, color: C.white, whiteSpace: "nowrap" }}>{taxLookup === "loading" ? "Đang tra..." : "Tra cứu"}</button>
+        </div>
+        {form.companyName && <div className="addr-preview">🏢 {form.companyName}{form.companyAddress ? ` — ${form.companyAddress}` : ""}</div>}
+        {taxLookup && taxLookup !== "loading" && <div className={`status ${taxLookup.tone === "error" ? "error" : ""}`.trim()} style={taxLookup.tone === "ok" ? { color: C.green } : undefined}>{taxLookup.text}</div>}
+      </div>}
       <div className="field"><label>Số lượng</label><input type="number" min="1" value={form.qty} onChange={(e) => upd("qty", e.target.value)} style={inputStyle()} /></div>
       <div className="total"><span>Tạm tính</span><strong>{fmtV(total)}</strong></div>
       <button className="submit-order" disabled={status === "sending"} onClick={submit}>{status === "sending" ? "Đang gửi..." : "Gửi đơn"}</button>
