@@ -682,6 +682,16 @@ function normalizePhone(value) {
 function OrderModal({ product, onClose }) {
   const [form, setForm] = useState({ name: "", phone: "", street: "", ward: "", province: "", qty: 1 });
   const [status, setStatus] = useState(null);
+  const [wardOptions, setWardOptions] = useState([]);
+  useEffect(() => {
+    const prov = VN_PROVINCES.find((p) => p.name === form.province);
+    if (!prov) { setWardOptions([]); return; }
+    let alive = true;
+    apiGet(`/api/public/wards?province_id=${prov.id}`)
+      .then((r) => { if (alive) setWardOptions(Array.isArray(r.wards) ? r.wards : []); })
+      .catch(() => { if (alive) setWardOptions([]); });
+    return () => { alive = false; };
+  }, [form.province]);
   const statusMessage = status && status !== "sending" ? (status.text || status) : "";
   const statusTone = status && typeof status === "object" ? status.tone : "";
   const total = (Number(product?.price) || 0) * (Number(form.qty) || 1);
@@ -747,8 +757,8 @@ function OrderModal({ product, onClose }) {
       {tf("name", "Họ tên người nhận", "Ví dụ: Trần Minh Hiền")}
       {tf("phone", "Số điện thoại", "Ví dụ: 0909418151")}
       {tf("street", "① Số nhà + tên đường", "Ví dụ: 108 Võ Văn Kiệt")}
-      {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><select value={form.province} onChange={(e) => upd("province", e.target.value)} style={inputStyle()}><option value="">— Chọn tỉnh / thành phố —</option>{VN_PROVINCES.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>}
-      {hasProvince && tf("ward", "③ Phường / Xã / Thị trấn", "Ví dụ: Phường Bến Thành")}
+      {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><select value={form.province} onChange={(e) => setForm((f) => ({ ...f, province: e.target.value, ward: "" }))} style={inputStyle()}><option value="">— Chọn tỉnh / thành phố —</option>{VN_PROVINCES.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>}
+      {hasProvince && <div className="field"><label>③ Phường / Xã / Thị trấn</label><select value={form.ward} onChange={(e) => upd("ward", e.target.value)} style={inputStyle()}><option value="">{wardOptions.length ? "— Chọn phường / xã —" : "Đang tải phường/xã..."}</option>{wardOptions.map((w) => <option key={w} value={w}>{w}</option>)}</select></div>}
       {addressPreview && <div className="addr-preview">📍 Giao tới: {addressPreview}</div>}
       <div className="field"><label>Số lượng</label><input type="number" min="1" value={form.qty} onChange={(e) => upd("qty", e.target.value)} style={inputStyle()} /></div>
       <div className="total"><span>Tạm tính</span><strong>{fmtV(total)}</strong></div>
