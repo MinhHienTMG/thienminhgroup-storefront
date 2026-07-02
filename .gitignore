@@ -5,3 +5,4 @@ dist
 .codex
 qa-screenshots
 public/images/products/reports
+.vercel
