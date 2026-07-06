@@ -2,6 +2,9 @@
 KHÔNG làm việc ở bản ổ C (C:\Users\CTYThienMinhGroup\Documents\GitHub\) nữa.
 Bản C đã NGỪNG DÙNG (chỉ giữ để backup). Mọi sửa đổi/commit chỉ thực hiện ở ổ D.
 Cập nhật: 2026-06-20.
+
+> 📌 **ĐỌC TRƯỚC:** tiến độ tổng & bộ nhớ toàn dự án automation ở `../thienminhgroup-api/docs/TMG_MASTER_STATUS_2026-07-05.md` (đã làm gì / đang chạy gì / còn thiếu / kế hoạch 6 bước).
+
 # Thiên Minh Group — Storefront
 
 ## Tôi là ai
