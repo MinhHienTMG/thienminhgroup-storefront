@@ -6,3 +6,6 @@ dist
 qa-screenshots
 public/images/products/reports
 .vercel
+
+# File backup local convention TMG
+*.localbak
