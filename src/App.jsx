@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import productImageManifest from "./productImageManifest.json";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? "" : "https://web-production-7d03f.up.railway.app");
@@ -576,36 +576,20 @@ function inputStyle() {
   return { width: "100%", background: C.white, border: `1px solid ${C.line}`, borderRadius: 8, padding: "11px 12px", color: C.text, outline: "none" };
 }
 
-function isFailedOrderStep(value) {
-  if (value === false) return true;
-  if (typeof value === "string") {
-    return ["failed", "error", "not_configured"].includes(value.toLowerCase());
-  }
-  if (!value || typeof value !== "object") return false;
-  return value.ok === false
-    || value.success === false
-    || value.synced === false
-    || value.created === false
-    || ["failed", "error", "not_configured"].includes(String(value.status || "").toLowerCase())
-    || Boolean(value.error || value.reason);
+// Chỉ coi là đặt thành công khi máy chủ xác nhận ĐÃ LƯU (storage.persisted === true).
+// Thiếu cờ, phản hồi lạ, không đọc được → coi như CHƯA lưu, không báo khách "đã đặt".
+function orderPersisted(res) {
+  return Boolean(res && typeof res === "object" && res.storage && res.storage.persisted === true);
 }
 
-function orderResponseStatus(res) {
-  const storageFailed = isFailedOrderStep(res?.storage);
-  const kiotFailed = isFailedOrderStep(res?.kiot_sync) || isFailedOrderStep(res?.kiot_order);
-  return { storageFailed, kiotFailed };
-}
+const ORDER_CONTACTS = [["Minh Hiền", "0909418151"], ["Ngọc Linh", "0909858011"], ["Minh Thắng", "0937858011"]];
 
-function orderResponseDiagnostics(res, flags) {
-  return {
-    order_id: res?.order_id || null,
-    storage_persisted: res?.storage?.persisted,
-    storage_error: res?.storage?.error,
-    kiot_sync: res?.kiot_sync,
-    kiot_order_ok: typeof res?.kiot_order === "object" ? res.kiot_order.ok ?? res.kiot_order.success ?? res.kiot_order.created : res?.kiot_order,
-    storage_failed: flags.storageFailed,
-    kiot_failed: flags.kiotFailed,
-  };
+function OrderContactList() {
+  return ORDER_CONTACTS.map(([nm, ph]) => <div key={ph} className="contact-row">
+    <span className="contact-name">{nm}</span>
+    <a className="contact-tel" href={`tel:${ph}`}>📞 {ph}</a>
+    <a className="contact-zalo" href={`https://zalo.me/${ph}`} target="_blank" rel="noopener noreferrer">💬 Zalo</a>
+  </div>);
 }
 
 function HotlineModal({ contacts, onClose }) {
@@ -737,6 +721,11 @@ function OrderModal({ product, onClose }) {
   const [countdown, setCountdown] = useState(3);
   const [showContacts, setShowContacts] = useState(false);
   const [paused, setPaused] = useState(false);
+  const sendingRef = useRef(false);
+  const statusRef = useRef(null);
+  useEffect(() => {
+    if (status && status.contacts && statusRef.current) statusRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [status]);
   // Reset toàn bộ khi mở sản phẩm khác (component không remount giữa các lần mở).
   useEffect(() => {
     setDone(null); setStatus(null); setShowContacts(false); setPaused(false); setTaxLookup(null);
@@ -816,16 +805,35 @@ function OrderModal({ product, onClose }) {
       payload.company_address = form.companyAddress.trim();
     }
     if (comboItems.length) payload.items = comboItems;
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     setStatus("sending");
     try {
       const res = await apiPost("/api/public/orders", payload);
-      const flags = orderResponseStatus(res);
-      if (flags.storageFailed || flags.kiotFailed) {
-        console.warn("Order accepted with backend follow-up issue", orderResponseDiagnostics(res, flags));
+      if (orderPersisted(res)) {
+        setCountdown(3);
+        setDone({ orderId: res.order_id || "" });
+        return;
       }
-      setCountdown(3);
-      setDone({ orderId: res.order_id || "" });
-    } catch (e) { setStatus({ tone: "error", text: "Chưa gửi được đơn. Vui lòng thử lại hoặc gọi hotline để được hỗ trợ." }); }
+      // Máy chủ đã nhận nhưng KHÔNG lưu được: máy chủ vẫn gửi Telegram đơn + cảnh báo cho shop,
+      // nên mời khách gọi trước thay vì bấm gửi lại (tránh trùng đơn).
+      const ref = res && typeof res.order_id === "string" ? res.order_id : "";
+      setStatus({
+        tone: "error",
+        contacts: true,
+        retry: true,
+        text: `Hệ thống đang bận, đơn của anh/chị CHƯA được ghi nhận chắc chắn${ref ? ` (mã tham chiếu: ${ref})` : ""}. Vui lòng gọi hoặc nhắn Zalo cho shop theo số bên dưới để chốt đơn ngay. Shop có thể đã nhận được thông tin, nên anh/chị vui lòng gọi trước — chỉ bấm "Gửi lại đơn" khi chưa liên lạc được shop.`,
+      });
+    } catch (e) {
+      setStatus({
+        tone: "error",
+        contacts: true,
+        retry: true,
+        text: "Hệ thống đang bận, chưa xác nhận được đơn của anh/chị. Vui lòng gọi hoặc nhắn Zalo cho shop theo số bên dưới để chốt đơn ngay. Shop có thể đã nhận được thông tin, nên anh/chị vui lòng gọi trước — chỉ bấm \"Gửi lại đơn\" khi chưa liên lạc được shop. Thông tin anh/chị đã nhập vẫn được giữ nguyên.",
+      });
+    } finally {
+      sendingRef.current = false;
+    }
   };
   if (!product) return null;
   if (done) {
@@ -839,11 +847,7 @@ function OrderModal({ product, onClose }) {
             <button className="submit-order" onClick={onClose}>Tiếp tục xem sản phẩm{!paused && countdown > 0 ? ` (${countdown}s)` : ""}</button>
             <button className="ghost-btn" onClick={() => { setShowContacts(true); setPaused(true); }}>📞 Gọi / Zalo shop ngay</button>
           </div> : <div className="contact-list">
-            {[["Minh Hiền", "0909418151"], ["Ngọc Linh", "0909858011"], ["Minh Thắng", "0937858011"]].map(([nm, ph]) => <div key={ph} className="contact-row">
-              <span className="contact-name">{nm}</span>
-              <a className="contact-tel" href={`tel:${ph}`}>📞 {ph}</a>
-              <a className="contact-zalo" href={`https://zalo.me/${ph}`} target="_blank" rel="noreferrer">💬 Zalo</a>
-            </div>)}
+            <OrderContactList />
             <button className="ghost-btn" onClick={onClose}>Đóng</button>
           </div>}
         </div>
@@ -853,8 +857,9 @@ function OrderModal({ product, onClose }) {
   const hasStreet = form.street.trim().length > 0;
   const hasProvince = form.province.length > 0;
   const tf = (k, label, ph) => <div key={k} className="field"><label>{label}</label><input value={form[k]} placeholder={ph} inputMode={k === "phone" ? "numeric" : undefined} onChange={(e) => upd(k, e.target.value)} style={inputStyle()} /></div>;
-  return <div className="modal-backdrop" onClick={onClose}>
-    <div className="modal" onClick={(e) => e.stopPropagation()}>
+  const keepOpen = status === "sending" || Boolean(status && status.contacts);
+  return <div className="modal-backdrop" onClick={keepOpen ? undefined : onClose}>
+    <div className="modal" style={{ maxHeight: "calc(100vh - 36px)", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
       <div className="modal-title"><div><h3>Đặt hàng</h3><p>{product.name}</p></div><button onClick={onClose}>×</button></div>
       <div className="field"><label>Loại khách hàng</label>
         <div style={{ display: "flex", gap: 8 }}>
@@ -877,8 +882,9 @@ function OrderModal({ product, onClose }) {
       </div>}
       <div className="field"><label>Số lượng</label><input type="number" min="1" value={form.qty} onChange={(e) => upd("qty", e.target.value)} style={inputStyle()} /></div>
       <div className="total"><span>Tạm tính</span><strong>{fmtV(total)}</strong></div>
-      <button className="submit-order" disabled={status === "sending"} onClick={submit}>{status === "sending" ? "Đang gửi..." : "Gửi đơn"}</button>
-      {statusMessage && <div className={`status ${statusTone}`.trim()}>{statusMessage}</div>}
+      <button className="submit-order" disabled={status === "sending"} onClick={submit}>{status === "sending" ? "Đang gửi..." : (status && status.retry ? "Gửi lại đơn" : "Gửi đơn")}</button>
+      {statusMessage && <div ref={statusRef} className={`status ${statusTone}`.trim()} role="alert">{statusMessage}</div>}
+      {status && status.contacts && <div className="contact-list" style={{ marginTop: 10 }}><OrderContactList /></div>}
     </div>
   </div>;
 }

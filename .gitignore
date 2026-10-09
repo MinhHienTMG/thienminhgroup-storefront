@@ -9,3 +9,6 @@ public/images/products/reports
 
 # File backup local convention TMG
 *.localbak
+
+# file Windows tự tạo khi thư mục được đồng bộ/tuỳ biến — không phải code
+desktop.ini
