@@ -416,7 +416,17 @@ function localManifestImageUrls(p) {
     .map((fileName) => `${LOCAL_PRODUCT_IMAGE_BASE}/${encodeURIComponent(fileName)}`));
 }
 
+// Tạm thời KHÔNG bán / KHÔNG hiện combo trên web (Hiền chốt 10/10).
+// Nhận biết combo: (a) combo của web — máy chủ gắn type "combo" hoặc có mảng items;
+// (b) món KiotViet đóng bộ giá 0 có tên bắt đầu "Bộ Máy" (vd "Bộ Máy : 1 máy …"). Món giá 0 khác vẫn hiện "Gọi báo giá".
+function isComboProduct(p) {
+  if (!p) return false;
+  if (p.type === "combo" || (Array.isArray(p.items) && p.items.length > 0)) return true;
+  return !(Number(p.price) > 0) && normVi(p.name).startsWith("bo may");
+}
+
 function productReadyForStorefront(p) {
+  if (isComboProduct(p)) return false;
   return isServiceProduct(p) || explicitProductImages(p).length > 0 || localManifestImageUrls(p).length > 0;
 }
 
