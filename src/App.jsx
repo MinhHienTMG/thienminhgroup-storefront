@@ -55,7 +55,7 @@ const fmtV = (n = 0) => new Intl.NumberFormat("vi-VN").format(Number(n) || 0) + 
 const cleanText = (txt = "") => String(txt).replaceAll("<br/>", "\n").replaceAll("<br>", "\n").replace(/<[^>]*>/g, "").trim();
 const DEFAULT_META_TITLE = "Đại lý DEKTON chính hãng | Thiên Minh Group";
 const DEFAULT_META_DESCRIPTION = "Thiên Minh Group phân phối DEKTON chính hãng tại Việt Nam: máy pin, máy cắt, máy nén khí, máy rửa xe và phụ kiện. Tư vấn nhanh, COD toàn quốc.";
-const PROMO_SKUS = ["M21-AG100PLUS-XAM", "M21-B4085PLUS-XAM", "M21-S25PRO-XAM", "DK-VGT12N-XAM"];
+const BESTSELLER_SKUS = ["M21-AG100PLUS-XAM", "M21-B4085PLUS-XAM", "M21-S25PRO-XAM", "DK-VGT12N-XAM"];
 const DEFAULT_STOREFRONT_EFFECTS = {
   mode: "premium-flow",
   enabled: true,
@@ -78,12 +78,6 @@ const DEFAULT_STOREFRONT_EFFECTS = {
 const DEFAULT_CUSTOMER_ACTIONS = {
   view_products: {
     label: "Xem sản phẩm",
-    strategy: "random_target",
-    targets: [
-      { label: "Hàng hot", href: "#featured" },
-      { label: "Flash sale", href: "#flash-sale" },
-      { label: "Tất cả sản phẩm", href: "#products" },
-    ],
   },
   call_hotline: {
     label: "Gọi hotline",
@@ -95,37 +89,91 @@ const DEFAULT_CUSTOMER_ACTIONS = {
     ],
   },
   consult_zalo: {
-    label: "Gọi tư vấn",
-    strategy: "random_zalo_contact",
-    contacts: [
-      { name: "Minh Hiền", href: "https://zalo.me/0909418151" },
-      { name: "Ngọc Linh", href: "https://zalo.me/0909858011" },
-      { name: "Minh Thắng", href: "https://zalo.me/0937858011" },
-    ],
+    label: "Tư vấn Zalo",
   },
   product_card: {
     order_cta: "Đặt hàng",
-    order_target: "#order",
     consult_cta: "Tư vấn",
-    consult_strategy: "random_zalo_contact",
   },
 };
 
-async function apiGet(path) {
-  const res = await fetch(`${API_BASE}${path}`, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return res.json();
+const HOTLINE_MAIN = "0909418151";
+const HOTLINE_MAIN_TEXT = "0909 418 151";
+const ZALO_URL = `https://zalo.me/${HOTLINE_MAIN}`;
+const PRIVACY_URL = "/chinh-sach-bao-mat.html";
+
+// Lỗi từ máy chủ: giữ status + câu `detail` tiếng Việt (chỉ khi là chuỗi) để hiện nguyên văn cho khách.
+function httpError(res, json) {
+  const err = new Error(`${res.status} ${res.statusText}`);
+  err.status = res.status;
+  const detail = json && typeof json.detail === "string" ? json.detail.trim() : "";
+  err.detail = detail;
+  return err;
 }
 
-async function apiPost(path, data) {
-  const res = await fetch(`${API_BASE}${path}`, {
+async function fetchJson(path, options = {}, timeoutMs = 30000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { ...options, signal: ctrl.signal });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) throw httpError(res, json);
+    return json ?? {};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function apiGet(path, timeoutMs) {
+  return fetchJson(path, { headers: { Accept: "application/json" } }, timeoutMs);
+}
+
+function apiPost(path, data) {
+  return fetchJson(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(data),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json?.detail || json?.error || `${res.status} ${res.statusText}`);
-  return json;
+  }, 45000);
+}
+
+// Mã chống gửi trùng: tạo 1 lần khi mở form, giữ khi "Gửi lại đơn", đổi khi mở món khác / sau khi đặt xong. ≤ 64 ký tự.
+function makeOrderKey() {
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return `w-${crypto.randomUUID()}`;
+  } catch (e) { /* rơi xuống cách dự phòng */ }
+  return `w-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 8)}`.slice(0, 64);
+}
+
+// Hết hàng: chỉ món lẻ (combo không gắn), `stock` là số <= 0. Thiếu/không phải số -> coi như còn (không khoá nhầm).
+function isOutOfStock(p) {
+  if (!p || p.type === "combo" || (Array.isArray(p.items) && p.items.length)) return false;
+  if (p.stock === null || p.stock === undefined || p.stock === "") return false;
+  const n = Number(p.stock);
+  return Number.isFinite(n) && n <= 0;
+}
+
+function scrollToId(id) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch (e) { /* thử cách dự phòng */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
+}
+
+// Chữ khuyến mãi/giảm giá không có giá giảm thật -> không hiện (kể cả khi máy chủ cũ còn trả banner "Khuyến Mãi Tháng 5").
+function isPromoClaim(text) {
+  return /khuyến\s*mãi|khuyen\s*mai|giảm\s*\d+\s*%|flash\s*sale/i.test(String(text || ""));
 }
 
 function imageValues(value) {
@@ -245,41 +293,15 @@ function customerActions(settings) {
   return {
     ...DEFAULT_CUSTOMER_ACTIONS,
     ...apiActions,
-    view_products: { ...DEFAULT_CUSTOMER_ACTIONS.view_products, ...(apiActions.view_products || {}) },
+    view_products: { label: apiActions.view_products?.label || DEFAULT_CUSTOMER_ACTIONS.view_products.label },
     call_hotline: {
       ...DEFAULT_CUSTOMER_ACTIONS.call_hotline,
       ...(apiActions.call_hotline || {}),
       contacts: ensureContacts(apiActions.call_hotline?.contacts, fallbackPhones.length ? fallbackPhones : DEFAULT_CUSTOMER_ACTIONS.call_hotline.contacts),
     },
-    consult_zalo: {
-      ...DEFAULT_CUSTOMER_ACTIONS.consult_zalo,
-      ...(apiActions.consult_zalo || {}),
-      contacts: ensureContacts(apiActions.consult_zalo?.contacts, DEFAULT_CUSTOMER_ACTIONS.consult_zalo.contacts),
-    },
+    consult_zalo: { label: DEFAULT_CUSTOMER_ACTIONS.consult_zalo.label },
     product_card: { ...DEFAULT_CUSTOMER_ACTIONS.product_card, ...(apiActions.product_card || {}) },
   };
-}
-
-function randomItem(rows) {
-  const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
-  if (!list.length) return null;
-  return list[Math.floor(Math.random() * list.length)];
-}
-
-function openCustomerHref(href) {
-  const target = String(href || "").trim();
-  if (!target) return;
-  if (target.startsWith("#")) {
-    document.querySelector(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    history.replaceState(null, "", `${location.pathname}${location.search}${target}`);
-    return;
-  }
-  window.location.href = target;
-}
-
-function openRandomTarget(rows) {
-  const picked = randomItem(rows);
-  openCustomerHref(picked?.href || picked?.value || picked);
 }
 
 function effectStyle(settings) {
@@ -334,7 +356,7 @@ const EFFECT_STYLE_CSS = `
   .effect-surface .promo-tabs a{background:rgba(255,255,255,.9);backdrop-filter:blur(10px);box-shadow:0 12px 30px rgba(19,23,31,.055)}
   .effect-surface .promo-tabs a:first-child{background:var(--fx-accent);border-color:var(--fx-accent);color:white}
   .effect-surface .product-section{position:relative;margin-top:30px;padding:30px 20px 36px;border-radius:18px;background-color:#111820;background-image:linear-gradient(90deg,rgba(8,11,15,.68) 0%,rgba(8,11,15,.42) 36%,rgba(8,11,15,.08) 68%,rgba(8,11,15,.34) 100%),url("/images/effects/dekton-section-products.webp");background-repeat:no-repeat;background-size:cover;background-position:center;box-shadow:0 30px 88px rgba(0,0,0,.34),inset 0 0 0 1px rgba(255,255,255,.16)}
-  .effect-surface #flash-sale{background-image:linear-gradient(90deg,rgba(8,11,15,.72) 0%,rgba(48,8,10,.42) 36%,rgba(8,11,15,.06) 68%,rgba(8,11,15,.34) 100%),url("/images/effects/dekton-section-flash.webp")}
+  .effect-surface #best-sellers{background-image:linear-gradient(90deg,rgba(8,11,15,.72) 0%,rgba(48,8,10,.42) 36%,rgba(8,11,15,.06) 68%,rgba(8,11,15,.34) 100%),url("/images/effects/dekton-section-flash.webp")}
   .effect-surface #new-arrivals{background-image:linear-gradient(90deg,rgba(8,11,15,.72) 0%,rgba(5,43,34,.38) 36%,rgba(8,11,15,.06) 68%,rgba(8,11,15,.34) 100%),url("/images/effects/dekton-section-new.webp")}
   .effect-surface #featured{background-image:linear-gradient(90deg,rgba(8,11,15,.72) 0%,rgba(54,34,5,.38) 36%,rgba(8,11,15,.06) 68%,rgba(8,11,15,.34) 100%),url("/images/effects/dekton-section-featured.webp")}
   .effect-surface .product-section .section-head,.effect-surface .product-section .product-grid{position:relative;z-index:1}
@@ -346,7 +368,7 @@ const EFFECT_STYLE_CSS = `
   @keyframes fx-rotate{to{transform:rotate(360deg)}}
   @keyframes fx-stage-drift{0%,100%{background-position:center}50%{background-position:center 16px}}
   @media (prefers-reduced-motion:reduce){.effect-surface *,.effect-surface *:before,.effect-surface *:after{animation:none!important;transition:none!important}}
-  @media(max-width:560px){.effect-surface .topbar:before{display:none}.effect-surface .commerce-stage{padding-bottom:22px;background:linear-gradient(180deg,#11171d 0,#161b20 34%,#101419 100%)}.effect-surface .commerce-stage:before{inset:0 -52% -120px;opacity:calc(var(--fx-enabled) * .76)}.effect-surface .premium-hero{margin-top:12px;margin-bottom:16px;padding-top:16px;padding-bottom:18px;border-radius:14px;background-size:cover;background-position:center}.effect-surface .product-section{margin-top:20px;padding:20px 16px 24px;border-radius:14px;background-position:center top}.effect-surface .site-header:before{background:linear-gradient(120deg,rgba(215,25,32,.05),transparent)}}
+  @media(max-width:560px){.effect-surface .topbar:before{display:none}.effect-surface .commerce-stage{padding-bottom:22px;background:linear-gradient(180deg,#11171d 0,#161b20 34%,#101419 100%)}.effect-surface .commerce-stage:before{inset:0 -52% -120px;opacity:calc(var(--fx-enabled) * .76)}.effect-surface .premium-hero{margin-top:12px;margin-bottom:16px;padding-top:16px;padding-bottom:18px;border-radius:14px;background-size:cover;background-position:center}.effect-surface .product-section{margin-top:20px;padding:20px 16px 24px;border-radius:14px;background-position:center top}.effect-surface .site-header{backdrop-filter:none;background-image:none;background-color:#fff;box-shadow:none}.effect-surface .site-header:before,.effect-surface .site-header:after,.effect-surface .nav-row:before{display:none;animation:none}.effect-surface .nav-row{background-image:none;background-color:#fff}.effect-surface .premium-hero{background-image:linear-gradient(90deg,rgba(8,10,12,.94),rgba(21,4,6,.82));box-shadow:none}.effect-surface .premium-hero:before,.effect-surface .hero-main:before,.effect-surface .hero-promo:before{display:none;animation:none}.effect-surface .hero-main,.effect-surface .hero-promo,.effect-surface .trust-grid div,.effect-surface .promo-tabs a{backdrop-filter:none;box-shadow:none}.effect-surface .product-section{background-image:none!important;background-color:#111820;box-shadow:none;padding:14px 10px 18px}}
 `;
 
 function productImageAliases(p) {
@@ -405,7 +427,7 @@ function ProductImage({ p, onMissingImage }) {
     if (candidates.length && idx >= candidates.length) onMissingImage?.();
   }, [candidates.length, idx, onMissingImage]);
   if (!candidates.length || idx >= candidates.length) return null;
-  return <img src={candidates[idx]} alt={p.name} onError={() => setIdx((i) => i + 1)} className="product-img" />;
+  return <img src={candidates[idx]} alt={p.name} loading="lazy" decoding="async" onError={() => setIdx((i) => i + 1)} className="product-img" />;
 }
 
 function TopBar({ settings, actions }) {
@@ -420,7 +442,6 @@ function TopBar({ settings, actions }) {
 }
 
 function Header({ search, setSearch, actions, onHotline }) {
-  const viewTargets = actions.view_products.targets || DEFAULT_CUSTOMER_ACTIONS.view_products.targets;
   return <header className="site-header">
     <div className="wrap header-inner">
       <div className="brand">
@@ -431,12 +452,12 @@ function Header({ search, setSearch, actions, onHotline }) {
         </div>
       </div>
       <div className="search">
-        <span>🔍</span>
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm sản phẩm, SKU..." />
+        <span aria-hidden="true">🔍</span>
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm sản phẩm, SKU..." aria-label="Tìm sản phẩm" enterKeyHint="search" />
       </div>
       <div className="header-actions">
-        <a href={actions.call_hotline.contacts[0]?.href || "tel:0909418151"} onClick={(e) => { e.preventDefault(); onHotline(); }}>{actions.call_hotline.label || "Gọi hotline"}</a>
-        <a href={viewTargets[0]?.href || "#products"} className="cart-btn" onClick={(e) => { e.preventDefault(); openRandomTarget(viewTargets); }}>{actions.view_products.label || "Xem sản phẩm"}</a>
+        <a href={`tel:${HOTLINE_MAIN}`} onClick={(e) => { e.preventDefault(); onHotline(); }}>{actions.call_hotline.label || "Gọi hotline"}</a>
+        <a href="#products" className="cart-btn" onClick={(e) => { e.preventDefault(); scrollToId("products"); }}>{actions.view_products.label || "Xem sản phẩm"}</a>
       </div>
     </div>
   </header>;
@@ -459,17 +480,19 @@ function NavRow({ categories, selected, setSelected }) {
 }
 
 function PremiumHero({ banners, actions }) {
+  // Bỏ banner mang chữ khuyến mãi/giảm giá (chưa có giá giảm thật) — kể cả khi máy chủ cũ còn trả "Khuyến Mãi Tháng 5".
   const visible = (banners || []).filter((b) => b.visible !== false);
   const primary = visible[0] || {};
   const promo = visible[1] || {};
-  const viewTargets = actions.view_products.targets || DEFAULT_CUSTOMER_ACTIONS.view_products.targets;
-  const zaloContacts = actions.consult_zalo.contacts || DEFAULT_CUSTOMER_ACTIONS.consult_zalo.contacts;
+  const safe = (text) => (isPromoClaim(text) ? "" : text || "");
   const primaryTitle = /professional tools/i.test(primary.title || "")
     ? "Đại lý DEKTON chính hãng tại Việt Nam"
-    : primary.title || "Đại lý DEKTON chính hãng tại Việt Nam";
+    : safe(primary.title) || "Đại lý DEKTON chính hãng tại Việt Nam";
   const primarySub = /công cụ điện chuyên nghiệp/i.test(primary.sub || "")
     ? "Máy pin, máy cắt, máy rửa xe và phụ kiện DEKTON. Tư vấn nhanh, xác nhận trước khi giao."
-    : primary.sub || "Máy pin, máy cắt, máy rửa xe và phụ kiện DEKTON. Tư vấn nhanh, xác nhận trước khi giao.";
+    : safe(primary.sub) || "Máy pin, máy cắt, máy rửa xe và phụ kiện DEKTON. Tư vấn nhanh, xác nhận trước khi giao.";
+  const promoTitle = safe(promo.title) || "Giao hàng toàn quốc";
+  const promoSub = safe(promo.sub) || "Gọi xác nhận trước khi giao. COD hoặc chuyển khoản, hỗ trợ hóa đơn VAT.";
   return <section className="wrap premium-hero">
     <div className="hero-grid">
       <div className="hero-main">
@@ -477,15 +500,15 @@ function PremiumHero({ banners, actions }) {
           <h1>{primaryTitle}</h1>
           <p>{primarySub}</p>
           <div className="hero-actions">
-            <a href={viewTargets[0]?.href || "#products"} onClick={(e) => { e.preventDefault(); openRandomTarget(viewTargets); }}>{actions.view_products.label || "Xem sản phẩm"}</a>
-            <a href={zaloContacts[0]?.href || "#contact"} onClick={(e) => { e.preventDefault(); openRandomTarget(zaloContacts); }}>{actions.consult_zalo.label || "Gọi tư vấn"}</a>
+            <a href="#products" onClick={(e) => { e.preventDefault(); scrollToId("products"); }}>{actions.view_products.label || "Xem sản phẩm"}</a>
+            <a href={ZALO_URL} target="_blank" rel="noopener noreferrer">{actions.consult_zalo.label || "Tư vấn Zalo"}</a>
           </div>
         </div>
       </div>
       <div className="hero-promo">
         <div>
-          <h2>{promo.title || "Khuyến Mãi Tháng 5"}</h2>
-          <p>{promo.sub || "Máy Xịt Rửa Xe - Giảm 20%"}</p>
+          <h2>{promoTitle}</h2>
+          <p>{promoSub}</p>
         </div>
       </div>
     </div>
@@ -497,30 +520,36 @@ function PremiumHero({ banners, actions }) {
   </section>;
 }
 
-function ProductCard({ p, onOrder, onConsult, actions }) {
+function ProductCard({ p, onOrder, actions, stockKnown }) {
   const [imageMissing, setImageMissing] = useState(false);
   useEffect(() => setImageMissing(false), [p.sku]);
   if (imageMissing) return null;
-  return <article className="product-card">
+  const soldOut = stockKnown && isOutOfStock(p);
+  const noPrice = !(Number(p.price) > 0);
+  const locked = soldOut || noPrice;
+  return <article className={`product-card${soldOut ? " is-oos" : ""}`}>
     <div className="product-media">
       <ProductImage p={p} onMissingImage={() => setImageMissing(true)} />
-      {p.hot && <span className="hot-tag">HOT</span>}
+      {soldOut ? <span className="oos-tag">Hết – gọi đặt trước</span> : (p.hot && <span className="hot-tag">HOT</span>)}
     </div>
     <div className="product-body">
       <div className="product-cat">{customerCategory(p)}</div>
       <h3>{p.name}</h3>
       <div className="sku">{p.sku}</div>
-      <div className="price">{fmtV(p.price)}</div>
+      <div className="price">{noPrice ? "Liên hệ báo giá" : fmtV(p.price)}</div>
+      {locked && <a className="oos-call" href={`tel:${HOTLINE_MAIN}`}>{soldOut ? "Gọi đặt trước" : "Gọi báo giá"} {HOTLINE_MAIN_TEXT}</a>}
       <p>{cleanText(p.desc) || "Liên hệ để được tư vấn chi tiết."}</p>
       <div className="product-actions">
-        <button onClick={() => onOrder(p)}>{actions.product_card.order_cta || "Đặt hàng"}</button>
-        <button className="consult-btn" onClick={() => onConsult(p)}>{actions.product_card.consult_cta || "Tư vấn"}</button>
+        {noPrice
+          ? <a className="call-btn" href={`tel:${HOTLINE_MAIN}`}>Gọi báo giá</a>
+          : <button type="button" disabled={soldOut} onClick={() => onOrder(p)}>{soldOut ? "Hết hàng" : (actions.product_card.order_cta || "Đặt hàng")}</button>}
+        <a className="consult-btn" href={ZALO_URL} target="_blank" rel="noopener noreferrer">{locked ? "Zalo" : (actions.product_card.consult_cta || "Tư vấn")}</a>
       </div>
     </div>
   </article>;
 }
 
-function ProductSection({ id, title, kicker, products, onOrder, onConsult, actions }) {
+function ProductSection({ id, title, kicker, products, onOrder, actions, stockKnown }) {
   if (!products.length) return null;
   return <section id={id} className="wrap product-section">
     <div className="section-head">
@@ -531,14 +560,14 @@ function ProductSection({ id, title, kicker, products, onOrder, onConsult, actio
       <small>{products.length} sản phẩm</small>
     </div>
     <div className="product-grid">
-      {products.map((p) => <ProductCard key={`${title}-${p.id}-${p.sku}`} p={p} onOrder={onOrder} onConsult={onConsult} actions={actions} />)}
+      {products.map((p) => <ProductCard key={`${title}-${p.id}-${p.sku}`} p={p} onOrder={onOrder} actions={actions} stockKnown={stockKnown} />)}
     </div>
   </section>;
 }
 
 function PromoTabs() {
   return <div className="wrap promo-tabs">
-    <a href="#flash-sale">Flash Sale</a>
+    <a href="#best-sellers">Bán chạy</a>
     <a href="#new-arrivals">Hàng mới về</a>
     <a href="#featured">Hàng nổi bật</a>
     <a href="#products">Tất cả sản phẩm</a>
@@ -576,10 +605,10 @@ function inputStyle() {
   return { width: "100%", background: C.white, border: `1px solid ${C.line}`, borderRadius: 8, padding: "11px 12px", color: C.text, outline: "none" };
 }
 
-// Chỉ coi là đặt thành công khi máy chủ xác nhận ĐÃ LƯU (storage.persisted === true).
-// Thiếu cờ, phản hồi lạ, không đọc được → coi như CHƯA lưu, không báo khách "đã đặt".
-function orderPersisted(res) {
-  return Boolean(res && typeof res === "object" && res.storage && res.storage.persisted === true);
+// Chỉ coi là đặt thành công khi máy chủ xác nhận ĐÃ NHẬN (received) — máy chủ cũ chỉ có storage.persisted.
+// Thiếu cờ, phản hồi lạ, không đọc được -> coi như CHƯA nhận, không báo khách "đã đặt".
+function orderReceived(res) {
+  return Boolean(res && typeof res === "object" && (res.received === true || (res.storage && res.storage.persisted === true)));
 }
 
 const ORDER_CONTACTS = [["Minh Hiền", "0909418151"], ["Ngọc Linh", "0909858011"], ["Minh Thắng", "0937858011"]];
@@ -702,46 +731,57 @@ function SearchSelect({ value, onChange, options, placeholder, disabled }) {
 }
 
 const EMPTY_ORDER_FORM = { name: "", phone: "", street: "", ward: "", province: "", qty: 1, customerType: "individual", taxCode: "", companyName: "", companyAddress: "" };
+const ORDER_SEND_ERROR = "Hệ thống đang bận, chưa xác nhận được đơn của anh/chị. Vui lòng gọi hoặc nhắn Zalo cho shop theo số bên dưới để chốt đơn ngay. Shop có thể đã nhận được thông tin, nên anh/chị vui lòng gọi trước — chỉ bấm \"Gửi lại đơn\" khi chưa liên lạc được shop. Thông tin anh/chị đã nhập vẫn được giữ nguyên.";
 
-function OrderModal({ product, onClose }) {
+function OrderModal({ product, onClose, stockKnown }) {
   const [form, setForm] = useState(EMPTY_ORDER_FORM);
   const [status, setStatus] = useState(null);
   const [taxLookup, setTaxLookup] = useState(null);
-  const [wardOptions, setWardOptions] = useState([]);
-  useEffect(() => {
-    const prov = VN_PROVINCES.find((p) => p.name === form.province);
-    if (!prov) { setWardOptions([]); return; }
-    let alive = true;
-    apiGet(`/api/public/wards?province_id=${prov.id}`)
-      .then((r) => { if (alive) setWardOptions(Array.isArray(r.wards) ? r.wards : []); })
-      .catch(() => { if (alive) setWardOptions([]); });
-    return () => { alive = false; };
-  }, [form.province]);
+  const [wards, setWards] = useState({ state: "idle", list: [] }); // idle | loading | ok | error
+  const [wardTry, setWardTry] = useState(0);
   const [done, setDone] = useState(null);
-  const [countdown, setCountdown] = useState(3);
+  const [copied, setCopied] = useState(false);
   const [showContacts, setShowContacts] = useState(false);
-  const [paused, setPaused] = useState(false);
   const sendingRef = useRef(false);
   const statusRef = useRef(null);
+  const orderKeyRef = useRef(null);
+  if (orderKeyRef.current === null) orderKeyRef.current = makeOrderKey();
+
+  // Phường/xã: tải theo tỉnh; lỗi/rỗng -> khách gõ tay + nút thử lại (không bao giờ kẹt "Đang tải...").
   useEffect(() => {
-    if (status && status.contacts && statusRef.current) statusRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+    const prov = VN_PROVINCES.find((p) => p.name === form.province);
+    if (!prov) { setWards({ state: "idle", list: [] }); return; }
+    let alive = true;
+    setWards({ state: "loading", list: [] });
+    apiGet(`/api/public/wards?province_id=${prov.id}`, 15000)
+      .then((r) => {
+        if (!alive) return;
+        const list = (Array.isArray(r.wards) ? r.wards : []).map((w) => (typeof w === "string" ? w : w?.name)).filter(Boolean);
+        setWards(list.length ? { state: "ok", list } : { state: "error", list: [] });
+      })
+      .catch(() => { if (alive) setWards({ state: "error", list: [] }); });
+    return () => { alive = false; };
+  }, [form.province, wardTry]);
+
+  // Khi trạng thái là lỗi dài (kèm danh bạ) hoặc lỗi cần chú ý -> cuộn tới thông báo.
+  useEffect(() => {
+    if (status && status !== "sending" && status.contacts && statusRef.current) statusRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [status]);
-  // Reset toàn bộ khi mở sản phẩm khác (component không remount giữa các lần mở).
+
+  // Reset toàn bộ khi mở sản phẩm khác (component không remount giữa các lần mở) + đổi mã chống gửi trùng.
   useEffect(() => {
-    setDone(null); setStatus(null); setShowContacts(false); setPaused(false); setTaxLookup(null);
+    setDone(null); setStatus(null); setShowContacts(false); setTaxLookup(null); setCopied(false);
     setForm(EMPTY_ORDER_FORM);
+    orderKeyRef.current = makeOrderKey();
+    sendingRef.current = false;
   }, [product?.sku]);
-  // Đếm ngược tự đóng (chống khách bấm gửi nhiều lần). Dừng nếu khách mở danh bạ liên hệ.
-  useEffect(() => {
-    if (!done || paused) return;
-    if (countdown <= 0) { onClose(); return; }
-    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [done, countdown, paused]);
-  const statusMessage = status && status !== "sending" ? (status.text || status) : "";
-  const statusTone = status && typeof status === "object" ? status.tone : "";
-  const total = (Number(product?.price) || 0) * (Number(form.qty) || 1);
+
+  const sending = status === "sending";
+  const statusObj = status && status !== "sending" ? status : null;
+  const qtyNum = Math.floor(Number(form.qty)) || 1;
+  const total = (Number(product?.price) || 0) * Math.max(1, qtyNum);
   const upd = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
   const lookupTax = async () => {
     const mst = String(form.taxCode || "").replace(/\D/g, "");
     if (mst.length < 10) { setTaxLookup({ tone: "error", text: "Mã số thuế cần ít nhất 10 số." }); return; }
@@ -752,26 +792,39 @@ function OrderModal({ product, onClose }) {
       setTaxLookup({ tone: "ok", text: "Đã tìm thấy doanh nghiệp." });
     } catch (e) {
       setForm((f) => ({ ...f, companyName: "", companyAddress: "" }));
-      setTaxLookup({ tone: "error", text: "Không tìm thấy doanh nghiệp với mã số thuế này. Vui lòng kiểm tra lại." });
+      const text = e && e.status === 429 && e.detail
+        ? e.detail
+        : (e && (e.status === 404 || e.status === 422)
+          ? "Không tìm thấy doanh nghiệp với mã số thuế này. Vui lòng kiểm tra lại."
+          : "Chưa tra cứu được ngay lúc này. Vui lòng thử lại sau ít phút.");
+      setTaxLookup({ tone: "error", text });
     }
   };
+
   const addressPreview = composeVnAddress(form);
+
   const submit = async () => {
-    const qty = Math.max(1, Number(form.qty) || 1);
+    if (sendingRef.current) return; // bấm nhanh 2 lần chỉ 1 yêu cầu
+    const fail = (text) => setStatus({ tone: "error", text });
     const name = titleCaseName(form.name);
     const phone = normalizePhone(form.phone);
     const street = capWords(form.street), ward = form.ward.trim(), province = form.province.trim();
-    if (!name) { setStatus({ tone: "error", text: "Vui lòng nhập họ tên người nhận." }); return; }
-    if (!/^0\d{9}$/.test(phone)) { setStatus({ tone: "error", text: "Số điện thoại chưa đúng — cần 10 số, bắt đầu bằng 0." }); return; }
-    if (!street) { setStatus({ tone: "error", text: "Vui lòng nhập số nhà + tên đường." }); return; }
-    if (!province) { setStatus({ tone: "error", text: "Vui lòng chọn tỉnh / thành phố." }); return; }
-    if (!ward) { setStatus({ tone: "error", text: "Vui lòng nhập phường / xã / thị trấn." }); return; }
+    if (!name) return fail("Vui lòng nhập họ tên người nhận.");
+    if (!/^0\d{9}$/.test(phone)) return fail("Số điện thoại chưa đúng — cần 10 số, bắt đầu bằng 0.");
+    if (!street) return fail("Vui lòng nhập số nhà + tên đường.");
+    if (!province) return fail("Vui lòng chọn tỉnh / thành phố.");
+    if (!ward) return fail("Vui lòng nhập phường / xã / thị trấn.");
+    const qty = Number(form.qty);
+    if (!Number.isInteger(qty) || qty < 1 || qty > 50) return fail(`Số lượng cần là số nguyên từ 1 đến 50. Đặt số lượng lớn vui lòng gọi ${HOTLINE_MAIN_TEXT}.`);
     const isBusiness = form.customerType === "business";
     const taxCode = String(form.taxCode || "").replace(/\D/g, "");
     if (isBusiness) {
-      if (taxCode.length < 10) { setStatus({ tone: "error", text: "Vui lòng nhập mã số thuế (ít nhất 10 số) cho khách doanh nghiệp." }); return; }
-      if (!form.companyName.trim()) { setStatus({ tone: "error", text: "Vui lòng bấm \"Tra cứu\" để lấy tên công ty từ mã số thuế." }); return; }
+      if (taxCode.length < 10) return fail("Vui lòng nhập mã số thuế (ít nhất 10 số) cho khách doanh nghiệp.");
+      if (!form.companyName.trim()) return fail("Vui lòng bấm \"Tra cứu\" để lấy tên công ty từ mã số thuế.");
     }
+    if (stockKnown && isOutOfStock(product)) return fail(`Sản phẩm này hiện hết hàng. Vui lòng gọi ${HOTLINE_MAIN_TEXT} để đặt trước.`);
+    if (!(Number(product?.price) > 0)) return fail(`Sản phẩm này chưa có giá trên web. Vui lòng gọi ${HOTLINE_MAIN_TEXT} để được báo giá.`);
+
     const provinceId = (VN_PROVINCES.find((p) => p.name === province) || {}).id || null;
     const address = composeVnAddress({ street, ward, province });
     const comboItems = Array.isArray(product.items)
@@ -781,6 +834,7 @@ function OrderModal({ product, onClose }) {
           name: item.name || item.product_name || item.sku,
         })).filter((item) => item.sku)
       : [];
+    const webTotal = (Number(product?.price) || 0) * qty;
     const payload = {
       name,
       phone,
@@ -796,8 +850,9 @@ function OrderModal({ product, onClose }) {
       type: product.type === "combo" || comboItems.length ? "combo" : "single",
       product_name: product.name,
       product_sku: product.sku,
-      total: (Number(product?.price) || 0) * qty,
+      total: webTotal, // chỉ để máy chủ đối chiếu — máy chủ tự tính tiền
       customer_type: isBusiness ? "business" : "individual",
+      client_order_key: orderKeyRef.current,
     };
     if (isBusiness) {
       payload.tax_code = taxCode;
@@ -805,18 +860,25 @@ function OrderModal({ product, onClose }) {
       payload.company_address = form.companyAddress.trim();
     }
     if (comboItems.length) payload.items = comboItems;
-    if (sendingRef.current) return;
+
     sendingRef.current = true;
     setStatus("sending");
     try {
       const res = await apiPost("/api/public/orders", payload);
-      if (orderPersisted(res)) {
-        setCountdown(3);
-        setDone({ orderId: res.order_id || "" });
+      if (orderReceived(res)) {
+        const serverTotal = Number(res.total);
+        setDone({
+          orderId: typeof res.order_id === "string" ? res.order_id : "",
+          total: Number.isFinite(serverTotal) && serverTotal > 0 ? serverTotal : webTotal,
+          duplicate: res.duplicate === true,
+          productName: product.name,
+        });
+        setCopied(false);
+        setStatus(null);
+        orderKeyRef.current = makeOrderKey(); // đơn kế tiếp là đơn mới
         return;
       }
-      // Máy chủ đã nhận nhưng KHÔNG lưu được: máy chủ vẫn gửi Telegram đơn + cảnh báo cho shop,
-      // nên mời khách gọi trước thay vì bấm gửi lại (tránh trùng đơn).
+      // Máy chủ trả lời nhưng KHÔNG xác nhận đã nhận: mời khách gọi trước thay vì bấm gửi lại (tránh trùng đơn).
       const ref = res && typeof res.order_id === "string" ? res.order_id : "";
       setStatus({
         tone: "error",
@@ -825,66 +887,98 @@ function OrderModal({ product, onClose }) {
         text: `Hệ thống đang bận, đơn của anh/chị CHƯA được ghi nhận chắc chắn${ref ? ` (mã tham chiếu: ${ref})` : ""}. Vui lòng gọi hoặc nhắn Zalo cho shop theo số bên dưới để chốt đơn ngay. Shop có thể đã nhận được thông tin, nên anh/chị vui lòng gọi trước — chỉ bấm "Gửi lại đơn" khi chưa liên lạc được shop.`,
       });
     } catch (e) {
-      setStatus({
-        tone: "error",
-        contacts: true,
-        retry: true,
-        text: "Hệ thống đang bận, chưa xác nhận được đơn của anh/chị. Vui lòng gọi hoặc nhắn Zalo cho shop theo số bên dưới để chốt đơn ngay. Shop có thể đã nhận được thông tin, nên anh/chị vui lòng gọi trước — chỉ bấm \"Gửi lại đơn\" khi chưa liên lạc được shop. Thông tin anh/chị đã nhập vẫn được giữ nguyên.",
-      });
+      const detail = e && typeof e.detail === "string" ? e.detail : "";
+      const code = e && e.status;
+      if (code === 422) {
+        // Đơn bị từ chối vì dữ liệu -> chưa tạo đơn; khách sửa rồi gửi lại thì coi là đơn mới.
+        orderKeyRef.current = makeOrderKey();
+        setStatus({ tone: "error", text: detail || `Thông tin chưa hợp lệ, anh/chị kiểm lại hoặc gọi ${HOTLINE_MAIN_TEXT}.` });
+      } else if (code === 429) {
+        setStatus({ tone: "error", contacts: true, retry: true, text: detail || `Anh/chị gửi đơn quá nhiều lần trong thời gian ngắn. Vui lòng thử lại sau ít phút hoặc gọi ${HOTLINE_MAIN_TEXT}.` });
+      } else if (code === 503) {
+        setStatus({ tone: "error", contacts: true, retry: true, text: detail || `Hệ thống đang bận, anh/chị vui lòng gọi ${HOTLINE_MAIN_TEXT} hoặc Zalo để chốt đơn.` });
+      } else {
+        setStatus({ tone: "error", contacts: true, retry: true, text: ORDER_SEND_ERROR });
+      }
     } finally {
       sendingRef.current = false;
     }
   };
+
   if (!product) return null;
+
   if (done) {
-    return <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    return <div className="modal-backdrop">
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Đặt hàng thành công">
         <div className="thanks">
           <div className="thanks-check">✓</div>
           <h3>Cảm ơn quý khách đã tin tưởng đặt hàng!</h3>
-          <p className="thanks-msg">Thiên Minh Group đã nhận yêu cầu{done.orderId ? <> <strong>{done.orderId}</strong></> : null} và sẽ <strong>gọi xác nhận</strong> sản phẩm, địa chỉ và tổng tiền trước khi giao. Anh/chị <strong>chưa phải thanh toán</strong> gì lúc này.</p>
+          <p className="thanks-msg">Thiên Minh Group đã nhận yêu cầu đặt <strong>{done.productName}</strong> và sẽ <strong>gọi xác nhận</strong> sản phẩm, địa chỉ và tổng tiền trước khi giao. Anh/chị <strong>chưa phải thanh toán</strong> gì lúc này.</p>
+          {done.duplicate && <p className="thanks-msg">Đơn này đã được ghi nhận trước đó nên shop không tạo thêm đơn mới.</p>}
+          {done.orderId && <div className="order-code">
+            <span>Mã đơn</span>
+            <strong>{done.orderId}</strong>
+            <button type="button" onClick={async () => { setCopied(await copyText(done.orderId)); }}>{copied ? "Đã chép" : "Chép mã"}</button>
+          </div>}
+          {done.total > 0 && <div className="total"><span>Tổng tiền (tạm tính)</span><strong>{fmtV(done.total)}</strong></div>}
           {!showContacts ? <div className="thanks-actions">
-            <button className="submit-order" onClick={onClose}>Tiếp tục xem sản phẩm{!paused && countdown > 0 ? ` (${countdown}s)` : ""}</button>
-            <button className="ghost-btn" onClick={() => { setShowContacts(true); setPaused(true); }}>📞 Gọi / Zalo shop ngay</button>
+            <button type="button" className="submit-order" onClick={onClose}>Tiếp tục xem sản phẩm</button>
+            <button type="button" className="ghost-btn" onClick={() => setShowContacts(true)}>📞 Gọi / Zalo shop ngay</button>
           </div> : <div className="contact-list">
             <OrderContactList />
-            <button className="ghost-btn" onClick={onClose}>Đóng</button>
+            <button type="button" className="ghost-btn" onClick={onClose}>Đóng</button>
           </div>}
         </div>
       </div>
     </div>;
   }
+
   const hasStreet = form.street.trim().length > 0;
   const hasProvince = form.province.length > 0;
-  const tf = (k, label, ph) => <div key={k} className="field"><label>{label}</label><input value={form[k]} placeholder={ph} inputMode={k === "phone" ? "numeric" : undefined} onChange={(e) => upd(k, e.target.value)} style={inputStyle()} /></div>;
-  const keepOpen = status === "sending" || Boolean(status && status.contacts);
-  return <div className="modal-backdrop" onClick={keepOpen ? undefined : onClose}>
-    <div className="modal" style={{ maxHeight: "calc(100vh - 36px)", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-      <div className="modal-title"><div><h3>Đặt hàng</h3><p>{product.name}</p></div><button onClick={onClose}>×</button></div>
-      <div className="field"><label>Loại khách hàng</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          {[["individual", "Khách cá nhân"], ["business", "Doanh nghiệp / Hộ KD"]].map(([val, lbl]) => <button key={val} type="button" onClick={() => { upd("customerType", val); setTaxLookup(null); }} style={{ flex: 1, padding: "10px 8px", borderRadius: 8, cursor: "pointer", fontWeight: 600, border: `1px solid ${form.customerType === val ? C.red : C.line}`, background: form.customerType === val ? C.red : C.white, color: form.customerType === val ? C.white : C.text }}>{lbl}</button>)}
+  const tf = (k, label, ph, extra = {}) => <div key={k} className="field"><label>{label}</label><input value={form[k]} placeholder={ph} inputMode={k === "phone" ? "numeric" : undefined} onChange={(e) => upd(k, e.target.value)} style={inputStyle()} {...extra} /></div>;
+  const shortStatus = statusObj && !statusObj.contacts ? statusObj : null;
+  const longStatus = statusObj && statusObj.contacts ? statusObj : null;
+  // Không đóng khi bấm ngoài khung: khách đang nhập dở dễ bấm nhầm. Đóng bằng nút ×.
+  return <div className="modal-backdrop">
+    <div className="modal order-modal" role="dialog" aria-modal="true" aria-label="Đặt hàng">
+      <div className="modal-title"><div><h3>Đặt hàng</h3><p>{product.name}</p></div><button type="button" onClick={onClose} disabled={sending} aria-label="Đóng">×</button></div>
+      <div className="modal-body">
+        <div className="field"><label>Loại khách hàng</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["individual", "Khách cá nhân"], ["business", "Doanh nghiệp / Hộ KD"]].map(([val, lbl]) => <button key={val} type="button" onClick={() => { upd("customerType", val); setTaxLookup(null); }} style={{ flex: 1, padding: "10px 8px", borderRadius: 8, cursor: "pointer", fontWeight: 600, border: `1px solid ${form.customerType === val ? C.red : C.line}`, background: form.customerType === val ? C.red : C.white, color: form.customerType === val ? C.white : C.text }}>{lbl}</button>)}
+          </div>
         </div>
+        <div className="field"><label>{form.customerType === "business" ? "Họ tên người nhận hàng" : "Họ tên người nhận"}</label><input value={form.name} maxLength={80} autoComplete="name" placeholder="Ví dụ: Nguyễn Văn An" style={inputStyle()} onChange={(e) => upd("name", e.target.value)} onBlur={() => upd("name", titleCaseName(form.name))} /></div>
+        {tf("phone", "Số điện thoại", "Ví dụ: 0901 234 567", { maxLength: 20, autoComplete: "tel", type: "tel" })}
+        <div className="field"><label>① Số nhà + tên đường</label><input value={form.street} maxLength={150} autoComplete="street-address" placeholder="Ví dụ: 25 Lê Lợi" style={inputStyle()} onChange={(e) => upd("street", e.target.value)} onBlur={() => upd("street", capWords(form.street))} /></div>
+        {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><SearchSelect value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v, ward: "" }))} options={VN_PROVINCES.map((p) => p.name)} placeholder="Gõ để tìm — vd: hồ chí, hà nội" /></div>}
+        {hasProvince && <div className="field"><label>③ Phường / Xã / Thị trấn</label>
+          {wards.state === "ok" && <SearchSelect value={form.ward} onChange={(v) => upd("ward", v)} options={wards.list} placeholder="Gõ để tìm — vd: chánh hưng" />}
+          {wards.state === "loading" && <input disabled value="" placeholder="Đang tải phường/xã..." style={inputStyle()} />}
+          {wards.state === "error" && <>
+            <input value={form.ward} maxLength={80} placeholder="Gõ tên phường / xã / thị trấn" style={inputStyle()} onChange={(e) => upd("ward", e.target.value)} onBlur={() => upd("ward", capWords(form.ward))} />
+            <div className="ward-note">Chưa tải được danh sách phường/xã — anh/chị cứ gõ tay, đơn vẫn gửi được. <button type="button" className="link-btn" onClick={() => setWardTry((n) => n + 1)}>Thử tải lại</button></div>
+          </>}
+        </div>}
+        {addressPreview && <div className="addr-preview">📍 Giao tới: {addressPreview}</div>}
+        {form.customerType === "business" && <div className="field"><label>Mã số thuế (để xuất hóa đơn)</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={form.taxCode} inputMode="numeric" maxLength={20} placeholder="Ví dụ: 0317809858" style={{ ...inputStyle(), flex: 1 }} onChange={(e) => { upd("taxCode", e.target.value); if (taxLookup) setTaxLookup(null); }} />
+            <button type="button" onClick={lookupTax} disabled={taxLookup === "loading"} style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, background: C.red, color: C.white, whiteSpace: "nowrap" }}>{taxLookup === "loading" ? "Đang tra..." : "Tra cứu"}</button>
+          </div>
+          {form.companyName && <div className="addr-preview">🏢 {form.companyName}{form.companyAddress ? ` — ${form.companyAddress}` : ""}</div>}
+          {taxLookup && taxLookup !== "loading" && <div className={`status ${taxLookup.tone === "error" ? "error" : ""}`.trim()} style={taxLookup.tone === "ok" ? { color: C.green } : undefined}>{taxLookup.text}</div>}
+        </div>}
+        <div className="field"><label>Số lượng</label><input type="number" min="1" max="50" step="1" inputMode="numeric" value={form.qty} onChange={(e) => upd("qty", e.target.value)} style={inputStyle()} /></div>
+        {longStatus && <div ref={statusRef} className={`status ${longStatus.tone || ""}`.trim()} role="alert">{longStatus.text}</div>}
+        {longStatus && <div className="contact-list" style={{ marginTop: 10 }}><OrderContactList /></div>}
       </div>
-      <div className="field"><label>{form.customerType === "business" ? "Họ tên người nhận hàng" : "Họ tên người nhận"}</label><input value={form.name} placeholder="Ví dụ: Nguyễn Văn An" style={inputStyle()} onChange={(e) => upd("name", e.target.value)} onBlur={() => upd("name", titleCaseName(form.name))} /></div>
-      {tf("phone", "Số điện thoại", "Ví dụ: 0901 234 567")}
-      <div className="field"><label>① Số nhà + tên đường</label><input value={form.street} placeholder="Ví dụ: 25 Lê Lợi" style={inputStyle()} onChange={(e) => upd("street", e.target.value)} onBlur={() => upd("street", capWords(form.street))} /></div>
-      {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><SearchSelect value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v, ward: "" }))} options={VN_PROVINCES.map((p) => p.name)} placeholder="Gõ để tìm — vd: hồ chí, hà nội" /></div>}
-      {hasProvince && <div className="field"><label>③ Phường / Xã / Thị trấn</label><SearchSelect value={form.ward} onChange={(v) => upd("ward", v)} options={wardOptions} placeholder={wardOptions.length ? "Gõ để tìm — vd: chánh hưng" : "Đang tải phường/xã..."} disabled={!wardOptions.length} /></div>}
-      {addressPreview && <div className="addr-preview">📍 Giao tới: {addressPreview}</div>}
-      {form.customerType === "business" && <div className="field"><label>Mã số thuế (để xuất hóa đơn)</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input value={form.taxCode} inputMode="numeric" placeholder="Ví dụ: 0317809858" style={{ ...inputStyle(), flex: 1 }} onChange={(e) => { upd("taxCode", e.target.value); if (taxLookup) setTaxLookup(null); }} />
-          <button type="button" onClick={lookupTax} disabled={taxLookup === "loading"} style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, background: C.red, color: C.white, whiteSpace: "nowrap" }}>{taxLookup === "loading" ? "Đang tra..." : "Tra cứu"}</button>
-        </div>
-        {form.companyName && <div className="addr-preview">🏢 {form.companyName}{form.companyAddress ? ` — ${form.companyAddress}` : ""}</div>}
-        {taxLookup && taxLookup !== "loading" && <div className={`status ${taxLookup.tone === "error" ? "error" : ""}`.trim()} style={taxLookup.tone === "ok" ? { color: C.green } : undefined}>{taxLookup.text}</div>}
-      </div>}
-      <div className="field"><label>Số lượng</label><input type="number" min="1" value={form.qty} onChange={(e) => upd("qty", e.target.value)} style={inputStyle()} /></div>
-      <div className="total"><span>Tạm tính</span><strong>{fmtV(total)}</strong></div>
-      <button className="submit-order" disabled={status === "sending"} onClick={submit}>{status === "sending" ? "Đang gửi..." : (status && status.retry ? "Gửi lại đơn" : "Gửi đơn")}</button>
-      {statusMessage && <div ref={statusRef} className={`status ${statusTone}`.trim()} role="alert">{statusMessage}</div>}
-      {status && status.contacts && <div className="contact-list" style={{ marginTop: 10 }}><OrderContactList /></div>}
+      <div className="modal-foot">
+        {shortStatus && <div className={`status ${shortStatus.tone || ""}`.trim()} role="alert">{shortStatus.text}</div>}
+        <div className="total"><span>Tạm tính</span><strong>{fmtV(total)}</strong></div>
+        <button type="button" className="submit-order" disabled={sending} onClick={submit}>{sending ? "Đang gửi..." : (statusObj && statusObj.retry ? "Gửi lại đơn" : "Gửi đơn")}</button>
+        <p className="consent">Bấm “Gửi đơn” là anh/chị đồng ý với <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">Chính sách bảo mật</a> của Thiên Minh Group.</p>
+      </div>
     </div>
   </div>;
 }
@@ -895,7 +989,7 @@ function Footer({ settings }) {
     <div className="wrap footer-grid">
       <div><strong>{settings?.company || "Công Ty TNHH Việt Nam Thiên Minh Group"}</strong><p>MST: {settings?.tax_code || "0319414767"}<br />{settings?.address || "108 Võ Văn Kiệt, Phường Bến Thành, TP. Hồ Chí Minh"}</p></div>
       <div><strong>Hotline</strong>{phones.map((p) => <p key={p} className="footer-phone">{p}</p>)}</div>
-      <div><strong>Cam kết</strong><p>Hàng chính hãng, tư vấn kỹ thuật, giao hàng toàn quốc, xác nhận đơn trước khi giao.</p></div>
+      <div><strong>Cam kết</strong><p>Hàng chính hãng, tư vấn kỹ thuật, giao hàng toàn quốc, xác nhận đơn trước khi giao.</p><p><a className="footer-link" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">Chính sách bảo mật</a></p></div>
     </div>
   </footer>;
 }
@@ -905,8 +999,29 @@ export default function App() {
   const initialParams = new URLSearchParams(window.location.search);
   const [loading, setLoading] = useState(true), [err, setErr] = useState(""), [search, setSearch] = useState(initialParams.get("q") || ""), [cat, setCat] = useState(initialParams.get("cat") || "all"), [orderProduct, setOrderProduct] = useState(null);
   const [hotlineOpen, setHotlineOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const actions = useMemo(() => customerActions(settings), [settings]);
-  useEffect(() => { let alive = true; (async () => { setLoading(true); setErr(""); try { const [p, b, s] = await Promise.all([apiGet("/api/public/products"), apiGet("/api/public/banners"), apiGet("/api/public/settings")]); if (!alive) return; setProducts(Array.isArray(p.products) ? p.products : []); setBanners(Array.isArray(b.banners) ? b.banners : []); setSettings(s || null); } catch (e) { if (alive) setErr("Chưa tải được dữ liệu sản phẩm. Vui lòng thử lại sau hoặc liên hệ hotline."); } finally { if (alive) setLoading(false); } })(); return () => { alive = false; }; }, []);
+  // /products, /banners, /settings tải độc lập: banner/cài đặt lỗi không được làm mất danh sách hàng.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true); setErr("");
+      const [p, b, s] = await Promise.allSettled([apiGet("/api/public/products"), apiGet("/api/public/banners"), apiGet("/api/public/settings")]);
+      if (!alive) return;
+      if (p.status === "fulfilled") {
+        const rows = Array.isArray(p.value?.products) ? p.value.products : [];
+        setProducts(rows);
+        if (!rows.length) setErr("Danh sách sản phẩm đang tạm trống. Anh/chị bấm \"Tải lại\" hoặc gọi hotline để được tư vấn.");
+        else if (p.value?.error) setErr("Danh sách sản phẩm tải chưa đầy đủ. Anh/chị bấm \"Tải lại\" để xem đủ hàng.");
+      } else {
+        setErr("Chưa tải được danh sách sản phẩm. Anh/chị bấm \"Tải lại\" hoặc gọi hotline để được tư vấn.");
+      }
+      if (b.status === "fulfilled") setBanners(Array.isArray(b.value?.banners) ? b.value.banners : []);
+      if (s.status === "fulfilled") setSettings(s.value || null);
+      setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [reloadKey]);
   useEffect(() => {
     const titlePart = categoryTitle(cat) || "DEKTON chính hãng";
     const nextTitle = cat === "all" && !search.trim() ? DEFAULT_META_TITLE : `${titlePart}${search.trim() ? ` - ${search.trim()}` : ""} | Thiên Minh Group`;
@@ -923,22 +1038,27 @@ export default function App() {
     window.history.replaceState(null, "", nextUrl);
   }, [cat, search]);
   const publishableProducts = useMemo(() => products.filter(productReadyForStorefront), [products]);
+  // Chỉ gắn nhãn "Hết hàng" khi dữ liệu tồn kho thật sự có (ít nhất 1 món lẻ còn hàng) — tránh khoá nhầm cả shop nếu tồn kho không về.
+  const stockKnown = useMemo(() => products.some((p) => p.type !== "combo" && !(Array.isArray(p.items) && p.items.length) && Number(p.stock) > 0), [products]);
   const cats = useMemo(() => [...new Set(publishableProducts.map(customerCategoryPath))].sort(categorySort), [publishableProducts]);
+  // Chỉ mục tìm kiếm không dấu, tính 1 lần khi dữ liệu đổi.
+  const searchIndex = useMemo(() => publishableProducts.map((p) => ({ p, text: normVi(`${p.name} ${p.sku} ${cleanText(p.desc)}`) })), [publishableProducts]);
+  const searching = search.trim().length > 0;
   const shown = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return publishableProducts.filter((p) => {
+    const tokens = normVi(search).split(/\s+/).filter(Boolean);
+    return searchIndex.filter(({ p, text }) => {
       const path = customerCategoryPath(p);
       const inCategory = cat === "all" || path === cat || path.startsWith(`${cat} > `);
-      return inCategory && (!q || `${p.name} ${p.sku} ${p.desc}`.toLowerCase().includes(q));
-    });
-  }, [publishableProducts, cat, search]);
+      return inCategory && tokens.every((t) => text.includes(t));
+    }).map(({ p }) => p);
+  }, [searchIndex, cat, search]);
   const showroomProducts = useMemo(() => cat === "all" ? shown.filter((p) => categoryMain(customerCategoryPath(p)) !== "Dịch Vụ") : shown, [shown, cat]);
-  const flashSale = useMemo(() => {
-    const byPromoSku = PROMO_SKUS
+  const bestSellers = useMemo(() => {
+    const bySku = BESTSELLER_SKUS
       .map((sku) => showroomProducts.find((p) => normalizeSkuForImage(p.sku) === sku))
       .filter(Boolean);
     const byFlag = showroomProducts.filter((p) => p.hot || p.flash_sale || p.flashSale || p.sale_price || p.salePrice);
-    return pickUniqueProducts([byPromoSku, byFlag, showroomProducts], 8);
+    return pickUniqueProducts([bySku, byFlag, showroomProducts], 8);
   }, [showroomProducts]);
   const newProducts = useMemo(() => {
     return [...showroomProducts]
@@ -950,29 +1070,28 @@ export default function App() {
       .sort((a, b) => saleScore(b, showroomProducts.indexOf(b)) - saleScore(a, showroomProducts.indexOf(a)))
       .slice(0, 8);
   }, [showroomProducts]);
-  const consultProduct = () => openRandomTarget(actions.consult_zalo.contacts);
 
   return <div className="app effect-surface" style={effectStyle(settings)}>
     <style>{`
-      *{box-sizing:border-box}html,body,#root{max-width:100%;overflow-x:hidden;scroll-behavior:smooth}body{margin:0;background:${C.page};color:${C.text};font-family:system-ui,-apple-system,Segoe UI,sans-serif}button,input{font:inherit}button{cursor:pointer;transition:.16s ease}button:hover{filter:brightness(.97)}.wrap{width:100%;max-width:1280px;margin:0 auto;padding:0 20px}.topbar{background:${C.green};color:white;font-size:13px}.topbar-inner{min-height:34px;display:flex;align-items:center;justify-content:space-between;gap:16px}.site-header{background:${C.white};border-bottom:1px solid ${C.line};position:sticky;top:0;z-index:20}.header-inner{min-height:76px;display:grid;grid-template-columns:240px 1fr auto;align-items:center;gap:22px}.brand{display:flex;align-items:center;gap:12px}.brand-mark{width:46px;height:46px;border-radius:8px;background:${C.red};color:white;display:grid;place-items:center;font-weight:950;font-size:24px}.brand-name{font-size:26px;font-weight:950;color:${C.red};line-height:1}.brand-sub{font-size:12px;color:${C.ink};font-weight:800;letter-spacing:.8px}.search{height:44px;border:1px solid #d9dbe3;border-radius:8px;background:#f9fafb;display:flex;align-items:center;padding:0 14px;gap:10px}.search input{width:100%;border:0;outline:0;background:transparent;color:${C.ink}}.header-actions{display:flex;gap:10px}.header-actions a{border:1px solid ${C.line};background:white;border-radius:8px;padding:10px 14px;font-weight:800;color:${C.text};text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}.header-actions .cart-btn{background:${C.red};border-color:${C.red};color:white}.nav-row{background:white;border-bottom:1px solid ${C.line};overflow:hidden}.nav-scroll{display:flex;gap:8px;overflow-x:auto;max-width:100%;padding-top:10px;padding-bottom:10px;-ms-overflow-style:none;scrollbar-width:none}.nav-scroll::-webkit-scrollbar{display:none}.nav-scroll button{white-space:nowrap;border:0;background:transparent;color:${C.text};font-weight:800;padding:9px 12px;border-radius:8px}.nav-scroll button.active{background:${C.redSoft};color:${C.red}}.nav-sub{padding-top:0;padding-bottom:11px}.nav-sub button{font-size:13px;background:#fafafa;border:1px solid ${C.line};padding:8px 11px}.nav-sub button.active{background:${C.red};border-color:${C.red};color:white}.premium-hero{padding-top:22px}.hero-grid{display:grid;grid-template-columns:1.45fr .95fr;gap:16px}.hero-main,.hero-promo{min-height:210px;border-radius:10px;padding:28px;display:flex;align-items:flex-end;overflow:hidden;background:linear-gradient(135deg,#240505,#08080d 64%,#141018);color:white;border:1px solid #321014}.hero-promo{background:linear-gradient(135deg,#051a0f,#08090d 62%,#240505)}.hero-main h1,.hero-promo h2{margin:0 0 8px;font-size:34px;line-height:1.08;color:white}.hero-promo h2{font-size:28px}.hero-main p,.hero-promo p{margin:0;color:#f3d6d6;max-width:680px}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.hero-actions a{border:1px solid rgba(255,255,255,.28);border-radius:8px;padding:10px 14px;text-decoration:none;color:white;font-weight:900;background:rgba(255,255,255,.1)}.hero-actions a:first-child{background:${C.red};border-color:${C.red}}.trust-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}.trust-grid div{background:white;border:1px solid ${C.line};border-left:4px solid ${C.red};border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:4px}.trust-grid strong{color:${C.ink}}.trust-grid span{color:${C.muted};font-size:13px}.promo-tabs{display:flex;gap:10px;overflow-x:auto;padding-top:16px;padding-bottom:0}.promo-tabs a{white-space:nowrap;text-decoration:none;background:white;border:1px solid ${C.line};border-bottom:3px solid ${C.red};border-radius:8px;padding:10px 14px;color:${C.ink};font-weight:900;font-size:13px;box-shadow:0 6px 18px rgba(20,22,28,.05)}.promo-tabs a:first-child{background:${C.red};border-color:${C.red};color:white}.state-card{margin-top:18px;background:white;border:1px solid ${C.line};border-radius:10px;padding:34px;text-align:center;color:${C.muted}}.error-card{margin-top:18px;background:${C.redSoft};border-color:#ffcdd2;color:${C.redDark}}.product-section{padding-top:28px;overflow:hidden;scroll-margin-top:130px}.section-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:14px}.section-head span{display:block;color:${C.red};font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:.7px}.section-head h2{margin:3px 0 0;color:${C.ink};font-size:26px}.section-head small{color:${C.muted};font-weight:700}.product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));align-items:stretch;gap:16px}.product-card{min-width:0;max-width:100%;background:white;border:1px solid ${C.line};border-radius:8px;overflow:hidden;display:flex;flex-direction:column;height:100%;min-height:430px;box-shadow:0 8px 24px rgba(19,23,31,.06)}.product-media{height:214px;min-height:214px;max-height:214px;flex:0 0 214px;background:#fff;position:relative;display:grid;place-items:center;overflow:hidden;padding:0;border-bottom:1px solid ${C.line}}.product-img{position:absolute;inset:10px;display:block;width:calc(100% - 20px);height:calc(100% - 20px);max-width:calc(100% - 20px);max-height:calc(100% - 20px);object-fit:contain;object-position:center;background:white}.product-placeholder{width:100%;height:100%;background:linear-gradient(135deg,#fafafa,#f1f2f5);color:#8a82a0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;font-size:12px;font-weight:800;text-align:center}.product-placeholder strong{width:56px;height:56px;border-radius:8px;background:${C.red};color:white;display:grid;place-items:center;font-size:13px;letter-spacing:.8px}.product-placeholder span{color:${C.muted}}.hot-tag{position:absolute;top:10px;left:10px;background:${C.red};color:white;border-radius:5px;padding:4px 7px;font-size:10px;font-weight:950}.product-body{min-width:0;padding:14px;display:flex;flex-direction:column;gap:7px;flex:1}.product-cat{font-size:11px;color:${C.red};font-weight:900;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.product-card h3{max-width:100%;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;white-space:normal;word-break:break-word;margin:0;color:${C.ink};font-size:15px;line-height:1.35;height:61px;overflow:hidden;overflow-wrap:anywhere}.sku{font-size:11px;color:${C.muted};font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.price{font-size:16px;color:${C.red};font-weight:950;min-height:22px}.product-card p{margin:0;color:${C.muted};font-size:12px;line-height:1.5;height:54px;overflow:hidden;overflow-wrap:anywhere;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}.product-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto}.product-card button{border:0;border-radius:7px;background:${C.red};color:white;font-weight:900;padding:10px 12px;min-height:42px}.product-card .consult-btn{background:${C.dark2};border:1px solid #3c3d48;color:white}.modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:18px}.modal{width:440px;max-width:100%;background:white;border-radius:10px;padding:20px;box-shadow:0 20px 70px rgba(0,0,0,.28)}.modal-title{display:flex;justify-content:space-between;gap:12px;margin-bottom:14px}.modal-title h3{margin:0;color:${C.ink}}.modal-title p{margin:4px 0 0;color:${C.muted};font-size:13px}.modal-title button{border:0;background:transparent;font-size:28px;color:${C.muted}}.hotline-list{display:grid;gap:10px}.hotline-list a{display:flex;align-items:center;justify-content:space-between;gap:12px;text-decoration:none;border:1px solid ${C.line};border-radius:9px;padding:13px 14px;color:${C.ink};background:#fafafa}.hotline-list a strong{color:${C.red};font-size:18px}.field{margin-bottom:10px}.field label{display:block;color:${C.muted};font-size:11px;font-weight:900;margin-bottom:4px;text-transform:uppercase}.addr-preview{margin:2px 0 12px;font-size:12px;color:${C.muted};background:#f6f7f9;border:1px solid ${C.line};border-radius:7px;padding:8px 10px;line-height:1.45;overflow-wrap:anywhere}.ss-list{position:absolute;z-index:30;left:0;right:0;top:100%;margin-top:4px;max-height:240px;overflow-y:auto;background:#fff;border:1px solid #d9dbe3;border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.16)}.ss-item{padding:10px 12px;font-size:14px;color:${C.ink};cursor:pointer;line-height:1.3}.ss-item:hover{background:#f1f2f5}.thanks{text-align:center;padding:6px 2px}.thanks-check{width:62px;height:62px;border-radius:50%;background:#e8f6ec;color:${C.green};font-size:36px;font-weight:900;display:grid;place-items:center;margin:4px auto 14px}.thanks h3{margin:0 0 10px;color:${C.ink};font-size:19px;line-height:1.3}.thanks-msg{margin:0 0 18px;color:${C.muted};font-size:14px;line-height:1.6}.thanks-msg strong{color:${C.ink}}.thanks-actions{display:flex;flex-direction:column;gap:10px}.ghost-btn{border:1px solid ${C.red};background:#fff;color:${C.red};border-radius:8px;padding:12px;font-weight:900;font-size:14px;cursor:pointer}.contact-list{display:flex;flex-direction:column;gap:9px}.contact-row{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid ${C.line};border-radius:8px;padding:10px 12px;background:#fafafa}.contact-name{font-weight:800;color:${C.ink};font-size:13px}.contact-tel{color:${C.red};font-weight:900;text-decoration:none;font-size:14px}.contact-zalo{color:#0068ff;font-weight:900;text-decoration:none;font-size:13px}.total{display:flex;justify-content:space-between;color:${C.ink};font-weight:900;margin:12px 0}.submit-order{width:100%;border:0;border-radius:8px;padding:12px;background:${C.red};color:white;font-weight:950}.status{margin-top:12px;font-size:13px;color:${C.redDark};line-height:1.45}.status.ok{color:${C.green}}.status.warn{color:${C.gold}}.footer{margin-top:44px;background:linear-gradient(135deg,${C.dark},${C.dark2});border-top:4px solid ${C.red};color:white}.footer-grid{padding-top:30px;padding-bottom:30px;display:grid;grid-template-columns:2fr 1fr 1.4fr;gap:24px}.footer strong{display:block;margin-bottom:8px}.footer p{margin:0;color:#bfc1cc;line-height:1.7;font-size:13px}.footer-phone{color:#ffd16a!important;font-weight:900}@media(max-width:860px){.topbar-inner{justify-content:center;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}.header-inner{grid-template-columns:1fr;gap:12px;padding-top:14px;padding-bottom:14px}.header-actions{display:grid;grid-template-columns:1fr 1fr}.header-actions a{padding:9px 10px}.hero-grid,.trust-grid,.footer-grid{grid-template-columns:1fr}.hero-main,.hero-promo{min-height:176px;padding:22px}.hero-main h1{font-size:27px}.hero-promo h2{font-size:24px}.product-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.product-card{min-height:414px}.product-card h3{font-size:14px}.product-media{height:176px;min-height:176px;max-height:176px;flex-basis:176px}.wrap{padding-left:16px;padding-right:16px}}@media(max-width:560px){.product-grid{grid-template-columns:1fr}.product-card{width:100%;max-width:calc(100vw - 32px);min-height:430px}.product-media{height:224px;min-height:224px;max-height:224px;flex-basis:224px}.product-body>*{max-width:calc(100vw - 60px)}.product-body>.product-actions{max-width:100%;grid-template-columns:1fr}.section-head{align-items:flex-start;flex-direction:column;gap:4px}.brand-name{font-size:22px}.header-actions{grid-template-columns:1fr}.hero-main h1{font-size:24px;max-width:310px;overflow-wrap:anywhere}.hero-main p,.hero-promo p{max-width:310px;overflow-wrap:anywhere}.hero-promo h2{font-size:22px;max-width:310px;overflow-wrap:anywhere}.hero-actions a{padding:9px 12px}.premium-hero{padding-top:16px}}`}</style>
+      *{box-sizing:border-box}html,body,#root{max-width:100%;overflow-x:hidden;scroll-behavior:smooth}body{margin:0;background:${C.page};color:${C.text};font-family:system-ui,-apple-system,Segoe UI,sans-serif}button,input{font:inherit}button{cursor:pointer;transition:.16s ease}button:hover{filter:brightness(.97)}.wrap{width:100%;max-width:1280px;margin:0 auto;padding:0 20px}.topbar{background:${C.green};color:white;font-size:13px}.topbar-inner{min-height:34px;display:flex;align-items:center;justify-content:space-between;gap:16px}.site-header{background:${C.white};border-bottom:1px solid ${C.line};position:sticky;top:0;z-index:20}.header-inner{min-height:76px;display:grid;grid-template-columns:240px 1fr auto;align-items:center;gap:22px}.brand{display:flex;align-items:center;gap:12px}.brand-mark{width:46px;height:46px;border-radius:8px;background:${C.red};color:white;display:grid;place-items:center;font-weight:950;font-size:24px}.brand-name{font-size:26px;font-weight:950;color:${C.red};line-height:1}.brand-sub{font-size:12px;color:${C.ink};font-weight:800;letter-spacing:.8px}.search{height:44px;border:1px solid #d9dbe3;border-radius:8px;background:#f9fafb;display:flex;align-items:center;padding:0 14px;gap:10px}.search input{width:100%;border:0;outline:0;background:transparent;color:${C.ink}}.header-actions{display:flex;gap:10px}.header-actions a{border:1px solid ${C.line};background:white;border-radius:8px;padding:10px 14px;font-weight:800;color:${C.text};text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}.header-actions .cart-btn{background:${C.red};border-color:${C.red};color:white}.nav-row{background:white;border-bottom:1px solid ${C.line};overflow:hidden}.nav-scroll{display:flex;gap:8px;overflow-x:auto;max-width:100%;padding-top:10px;padding-bottom:10px;-ms-overflow-style:none;scrollbar-width:none}.nav-scroll::-webkit-scrollbar{display:none}.nav-scroll button{white-space:nowrap;border:0;background:transparent;color:${C.text};font-weight:800;padding:9px 12px;border-radius:8px}.nav-scroll button.active{background:${C.redSoft};color:${C.red}}.nav-sub{padding-top:0;padding-bottom:11px}.nav-sub button{font-size:13px;background:#fafafa;border:1px solid ${C.line};padding:8px 11px}.nav-sub button.active{background:${C.red};border-color:${C.red};color:white}.premium-hero{padding-top:22px}.hero-grid{display:grid;grid-template-columns:1.45fr .95fr;gap:16px}.hero-main,.hero-promo{min-height:210px;border-radius:10px;padding:28px;display:flex;align-items:flex-end;overflow:hidden;background:linear-gradient(135deg,#240505,#08080d 64%,#141018);color:white;border:1px solid #321014}.hero-promo{background:linear-gradient(135deg,#051a0f,#08090d 62%,#240505)}.hero-main h1,.hero-promo h2{margin:0 0 8px;font-size:34px;line-height:1.08;color:white}.hero-promo h2{font-size:28px}.hero-main p,.hero-promo p{margin:0;color:#f3d6d6;max-width:680px}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.hero-actions a{border:1px solid rgba(255,255,255,.28);border-radius:8px;padding:10px 14px;text-decoration:none;color:white;font-weight:900;background:rgba(255,255,255,.1)}.hero-actions a:first-child{background:${C.red};border-color:${C.red}}.trust-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}.trust-grid div{background:white;border:1px solid ${C.line};border-left:4px solid ${C.red};border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:4px}.trust-grid strong{color:${C.ink}}.trust-grid span{color:${C.muted};font-size:13px}.promo-tabs{display:flex;gap:10px;overflow-x:auto;padding-top:16px;padding-bottom:0}.promo-tabs a{white-space:nowrap;text-decoration:none;background:white;border:1px solid ${C.line};border-bottom:3px solid ${C.red};border-radius:8px;padding:10px 14px;color:${C.ink};font-weight:900;font-size:13px;box-shadow:0 6px 18px rgba(20,22,28,.05)}.promo-tabs a:first-child{background:${C.red};border-color:${C.red};color:white}.state-card{margin-top:18px;background:white;border:1px solid ${C.line};border-radius:10px;padding:34px;text-align:center;color:${C.muted}}.error-card{margin-top:18px;background:${C.redSoft};border-color:#ffcdd2;color:${C.redDark}}.product-section{padding-top:28px;overflow:hidden;scroll-margin-top:110px}.section-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:14px}.section-head span{display:block;color:${C.red};font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:.7px}.section-head h2{margin:3px 0 0;color:${C.ink};font-size:26px}.section-head small{color:${C.muted};font-weight:700}.product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));align-items:stretch;gap:16px}.product-card{min-width:0;max-width:100%;background:white;border:1px solid ${C.line};border-radius:8px;overflow:hidden;display:flex;flex-direction:column;height:100%;min-height:430px;box-shadow:0 8px 24px rgba(19,23,31,.06)}.product-media{height:214px;min-height:214px;max-height:214px;flex:0 0 214px;background:#fff;position:relative;display:grid;place-items:center;overflow:hidden;padding:0;border-bottom:1px solid ${C.line}}.product-img{position:absolute;inset:10px;display:block;width:calc(100% - 20px);height:calc(100% - 20px);max-width:calc(100% - 20px);max-height:calc(100% - 20px);object-fit:contain;object-position:center;background:white}.product-placeholder{width:100%;height:100%;background:linear-gradient(135deg,#fafafa,#f1f2f5);color:#8a82a0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;font-size:12px;font-weight:800;text-align:center}.product-placeholder strong{width:56px;height:56px;border-radius:8px;background:${C.red};color:white;display:grid;place-items:center;font-size:13px;letter-spacing:.8px}.product-placeholder span{color:${C.muted}}.hot-tag{position:absolute;top:10px;left:10px;background:${C.red};color:white;border-radius:5px;padding:4px 7px;font-size:10px;font-weight:950}.product-body{min-width:0;padding:14px;display:flex;flex-direction:column;gap:7px;flex:1}.product-cat{font-size:11px;color:${C.red};font-weight:900;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.product-card h3{max-width:100%;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;white-space:normal;word-break:break-word;margin:0;color:${C.ink};font-size:15px;line-height:1.35;height:61px;overflow:hidden;overflow-wrap:anywhere}.sku{font-size:11px;color:${C.muted};font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.price{font-size:16px;color:${C.red};font-weight:950;min-height:22px}.product-card p{margin:0;color:${C.muted};font-size:12px;line-height:1.5;height:54px;overflow:hidden;overflow-wrap:anywhere;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}.product-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto}.product-card button{border:0;border-radius:7px;background:${C.red};color:white;font-weight:900;padding:10px 12px;min-height:42px}.product-card .consult-btn{background:${C.dark2};border:1px solid #3c3d48;color:white}.modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:18px;overflow-y:auto;overscroll-behavior:contain}.modal{width:440px;max-width:100%;background:white;border-radius:10px;padding:20px;box-shadow:0 20px 70px rgba(0,0,0,.28);max-height:calc(100vh - 36px);max-height:calc(100dvh - 36px);overflow-y:auto}.modal-title{display:flex;justify-content:space-between;gap:12px;margin-bottom:14px}.modal-title h3{margin:0;color:${C.ink}}.modal-title p{margin:4px 0 0;color:${C.muted};font-size:13px}.modal-title button{border:0;background:transparent;font-size:28px;color:${C.muted}}.hotline-list{display:grid;gap:10px}.hotline-list a{display:flex;align-items:center;justify-content:space-between;gap:12px;text-decoration:none;border:1px solid ${C.line};border-radius:9px;padding:13px 14px;color:${C.ink};background:#fafafa}.hotline-list a strong{color:${C.red};font-size:18px}.field{margin-bottom:10px}.field label{display:block;color:${C.muted};font-size:11px;font-weight:900;margin-bottom:4px;text-transform:uppercase}.addr-preview{margin:2px 0 12px;font-size:12px;color:${C.muted};background:#f6f7f9;border:1px solid ${C.line};border-radius:7px;padding:8px 10px;line-height:1.45;overflow-wrap:anywhere}.ss-list{position:absolute;z-index:30;left:0;right:0;top:100%;margin-top:4px;max-height:240px;overflow-y:auto;background:#fff;border:1px solid #d9dbe3;border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.16)}.ss-item{padding:10px 12px;font-size:14px;color:${C.ink};cursor:pointer;line-height:1.3}.ss-item:hover{background:#f1f2f5}.thanks{text-align:center;padding:6px 2px}.thanks-check{width:62px;height:62px;border-radius:50%;background:#e8f6ec;color:${C.green};font-size:36px;font-weight:900;display:grid;place-items:center;margin:4px auto 14px}.thanks h3{margin:0 0 10px;color:${C.ink};font-size:19px;line-height:1.3}.thanks-msg{margin:0 0 18px;color:${C.muted};font-size:14px;line-height:1.6}.thanks-msg strong{color:${C.ink}}.thanks-actions{display:flex;flex-direction:column;gap:10px}.ghost-btn{border:1px solid ${C.red};background:#fff;color:${C.red};border-radius:8px;padding:12px;font-weight:900;font-size:14px;cursor:pointer}.contact-list{display:flex;flex-direction:column;gap:9px}.contact-row{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid ${C.line};border-radius:8px;padding:10px 12px;background:#fafafa}.contact-name{font-weight:800;color:${C.ink};font-size:13px}.contact-tel{color:${C.red};font-weight:900;text-decoration:none;font-size:14px}.contact-zalo{color:#0068ff;font-weight:900;text-decoration:none;font-size:13px}.total{display:flex;justify-content:space-between;color:${C.ink};font-weight:900;margin:12px 0}.submit-order{width:100%;border:0;border-radius:8px;padding:12px;background:${C.red};color:white;font-weight:950}.status{margin-top:12px;font-size:13px;color:${C.redDark};line-height:1.45}.status.ok{color:${C.green}}.status.warn{color:${C.gold}}.footer{margin-top:44px;background:linear-gradient(135deg,${C.dark},${C.dark2});border-top:4px solid ${C.red};color:white}.footer-grid{padding-top:30px;padding-bottom:30px;display:grid;grid-template-columns:2fr 1fr 1.4fr;gap:24px}.footer strong{display:block;margin-bottom:8px}.footer p{margin:0;color:#bfc1cc;line-height:1.7;font-size:13px}.footer-phone{color:#ffd16a!important;font-weight:900}.footer-link{color:#fff!important;text-decoration:underline}.modal input{font-size:16px}.order-modal{display:flex;flex-direction:column;padding:0;overflow:hidden}.order-modal .modal-title{margin:0;padding:16px 20px 12px;border-bottom:1px solid ${C.line}}.order-modal .modal-title button:disabled{opacity:.4;cursor:default}.modal-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:14px 20px 8px}.modal-foot{flex:0 0 auto;padding:10px 20px 14px;border-top:1px solid ${C.line};background:white}.modal-foot .total{margin:0 0 8px}.modal-foot .status{margin:0 0 8px}.submit-order{min-height:46px;cursor:pointer}.submit-order:disabled{opacity:.6;cursor:default}.consent{margin:8px 0 0;font-size:12px;color:${C.muted};line-height:1.45;text-align:center}.consent a{color:${C.red};font-weight:800}.ward-note{margin-top:6px;font-size:12px;color:${C.muted};line-height:1.45}.link-btn{border:0;background:transparent;padding:0;color:${C.red};font-weight:900;text-decoration:underline;font-size:12px}.order-code{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;padding:10px 12px;border:1px dashed #c9cbd3;border-radius:8px;background:#fafafa}.order-code span{color:${C.muted};font-size:12px;font-weight:800;text-transform:uppercase}.order-code strong{color:${C.ink};font-size:17px;letter-spacing:.3px;overflow-wrap:anywhere}.order-code button{border:1px solid ${C.red};background:white;color:${C.red};border-radius:7px;padding:7px 12px;font-weight:900;font-size:13px}.thanks .total{margin:0 0 16px}.retry-btn{margin-top:12px;border:0;border-radius:8px;background:${C.red};color:white;font-weight:900;padding:11px 22px;min-height:44px}.retry-btn:disabled{opacity:.6}.oos-tag{position:absolute;top:10px;left:10px;z-index:1;background:#3d3f48;color:white;border-radius:5px;padding:4px 8px;font-size:11px;font-weight:900}.oos-call{color:${C.redDark};font-weight:900;font-size:13px;text-decoration:none}.product-card.is-oos .product-img{opacity:.5}.product-card button:disabled{background:#c9cbd3;color:#fff;cursor:not-allowed;filter:none}.product-card a.consult-btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border:1px solid #3c3d48;border-radius:7px;background:${C.dark2};color:white;font-weight:900;padding:10px 12px;min-height:42px}.product-card a.consult-btn:hover{filter:brightness(1.15)}.product-card a.call-btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border-radius:7px;background:${C.red};color:white;font-weight:900;padding:10px 12px;min-height:42px}@media(max-width:860px){.topbar-inner{justify-content:center;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}.header-inner{grid-template-columns:1fr;gap:12px;padding-top:14px;padding-bottom:14px}.header-actions{display:grid;grid-template-columns:1fr 1fr}.header-actions a{padding:9px 10px}.hero-grid,.trust-grid,.footer-grid{grid-template-columns:1fr}.hero-main,.hero-promo{min-height:176px;padding:22px}.hero-main h1{font-size:27px}.hero-promo h2{font-size:24px}.product-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.product-card{min-height:414px}.product-card h3{font-size:14px}.product-media{height:176px;min-height:176px;max-height:176px;flex-basis:176px}.wrap{padding-left:16px;padding-right:16px}}@media(max-width:560px){.topbar{font-size:12px}.topbar-inner{min-height:28px;padding-top:4px;padding-bottom:4px}.topbar-inner span:not(:last-child){display:none}.header-inner{grid-template-columns:1fr auto;gap:8px 10px;min-height:0;padding-top:8px;padding-bottom:8px}.brand{gap:8px}.brand-mark{width:34px;height:34px;font-size:18px}.brand-name{font-size:20px}.brand-sub{font-size:10px}.header-actions{display:flex;gap:8px}.header-actions .cart-btn{display:none}.header-actions a{min-height:38px;padding:6px 14px;font-size:13px}.search{grid-column:1/-1;height:40px}.nav-scroll{padding-top:6px;padding-bottom:6px}.nav-scroll button{padding:7px 10px;font-size:13px}.nav-sub{padding-bottom:7px}.premium-hero{padding-top:12px}.hero-grid{grid-template-columns:1fr}.hero-promo{display:none}.hero-main{min-height:0;padding:16px}.hero-main h1{font-size:21px;max-width:none;overflow-wrap:anywhere}.hero-main p{max-width:none;font-size:14px;overflow-wrap:anywhere}.hero-actions{margin-top:12px}.hero-actions a{padding:9px 12px}.trust-grid{display:flex;overflow-x:auto;gap:8px;margin-top:10px}.trust-grid div{flex:0 0 auto;padding:8px 12px}.trust-grid span{display:none}.promo-tabs{padding-top:10px}.product-section{scroll-margin-top:96px}.section-head{align-items:flex-start;flex-direction:column;gap:2px}.section-head h2{font-size:21px}.product-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.product-card{width:auto;max-width:none;min-height:0}.product-media{height:148px;min-height:148px;max-height:148px;flex-basis:148px}.product-body{padding:10px;gap:5px}.product-card h3{font-size:13px;height:53px}.product-card p{display:none}.sku{font-size:10px}.price{font-size:15px;min-height:20px}.product-actions{grid-template-columns:1fr;gap:6px}.product-card button,.product-card a.consult-btn{min-height:40px;padding:8px}.modal-backdrop{padding:8px}.modal{max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px)}.modal-body{padding:12px 14px 6px}.order-modal .modal-title{padding:12px 14px 10px}.modal-foot{padding:8px 14px 12px}.footer-grid{gap:16px}}`}</style>
     <style>{EFFECT_STYLE_CSS}</style>
     <TopBar settings={settings} actions={actions} />
     <Header search={search} setSearch={setSearch} actions={actions} onHotline={() => setHotlineOpen(true)} />
     <NavRow categories={cats} selected={cat} setSelected={setCat} />
     <main className="commerce-stage">
       <PremiumHero banners={banners} actions={actions} />
-      <PromoTabs />
-      {err && <div className="wrap"><div className="state-card error-card">⚠️ {err}</div></div>}
-      {loading ? <div className="wrap"><div className="state-card">Đang tải dữ liệu từ hệ thống...</div></div> : <>
-        <ProductSection id="flash-sale" title="Flash Sale" kicker="Ưu đãi chủ động" products={flashSale} onOrder={setOrderProduct} onConsult={consultProduct} actions={actions} />
-        <ProductSection id="new-arrivals" title="Hàng mới về" kicker="Vừa cập nhật" products={newProducts} onOrder={setOrderProduct} onConsult={consultProduct} actions={actions} />
-        <ProductSection id="featured" title="Hàng nổi bật" kicker="Ưu tiên theo lượt bán Kiot" products={featuredProducts} onOrder={setOrderProduct} onConsult={consultProduct} actions={actions} />
-        <ProductSection id="products" title="Tất cả sản phẩm" kicker={cat === "all" ? "Danh mục đang bán" : cat} products={showroomProducts} onOrder={setOrderProduct} onConsult={consultProduct} actions={actions} />
-        {!shown.length && <div className="wrap"><div className="state-card">Không tìm thấy sản phẩm</div></div>}
+      {!searching && <PromoTabs />}
+      {err && <div className="wrap"><div className="state-card error-card">⚠️ {err}<div><button type="button" className="retry-btn" onClick={() => setReloadKey((n) => n + 1)} disabled={loading}>{loading ? "Đang tải..." : "Tải lại"}</button></div></div></div>}
+      {loading && !products.length ? <div className="wrap"><div className="state-card">Đang tải dữ liệu từ hệ thống...</div></div> : <>
+        {!searching && <ProductSection id="best-sellers" title="Bán chạy" kicker="Dòng máy được quan tâm" products={bestSellers} onOrder={setOrderProduct} actions={actions} stockKnown={stockKnown} />}
+        {!searching && <ProductSection id="new-arrivals" title="Hàng mới về" kicker="Vừa cập nhật" products={newProducts} onOrder={setOrderProduct} actions={actions} stockKnown={stockKnown} />}
+        {!searching && <ProductSection id="featured" title="Hàng nổi bật" kicker="Gợi ý chọn mua" products={featuredProducts} onOrder={setOrderProduct} actions={actions} stockKnown={stockKnown} />}
+        <ProductSection id="products" title={searching ? "Kết quả tìm kiếm" : "Tất cả sản phẩm"} kicker={searching ? `“${search.trim()}”` : (cat === "all" ? "Danh mục đang bán" : cat)} products={showroomProducts} onOrder={setOrderProduct} actions={actions} stockKnown={stockKnown} />
+        {!err && !shown.length && <div className="wrap"><div className="state-card">Không tìm thấy sản phẩm phù hợp{searching ? <> với “{search.trim()}”</> : null}.{" "}Anh/chị thử từ khóa khác hoặc gọi {HOTLINE_MAIN_TEXT} để được tư vấn.</div></div>}
       </>}
     </main>
     <Footer settings={settings} />
     <HotlineModal contacts={hotlineOpen ? actions.call_hotline.contacts : []} onClose={() => setHotlineOpen(false)} />
-    <OrderModal product={orderProduct} onClose={() => setOrderProduct(null)} />
+    <OrderModal product={orderProduct} onClose={() => setOrderProduct(null)} stockKnown={stockKnown} />
   </div>;
 }
