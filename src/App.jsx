@@ -54,7 +54,8 @@ const C = {
 // Giá luôn là số nguyên đồng (máy chủ cũ có thể trả 2509259.26). Web không tự nhân VAT.
 const fmtV = (n = 0) => new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0)) + "đ";
 // Chỉ ghi "đã gồm VAT" khi dữ liệu món có vat_rate (máy chủ mới).
-const hasVat = (p) => p != null && p.vat_rate !== undefined && p.vat_rate !== null && p.vat_rate !== "" && Number.isFinite(Number(p.vat_rate));
+// vat_rate = 0 (món không thuế) thì KHÔNG được ghi "đã gồm VAT".
+const hasVat = (p) => p != null && p.vat_rate !== undefined && p.vat_rate !== null && p.vat_rate !== "" && Number(p.vat_rate) > 0;
 const cleanText = (txt = "") => String(txt).replaceAll("<br/>", "\n").replaceAll("<br>", "\n").replace(/<[^>]*>/g, "").trim();
 const DEFAULT_META_TITLE = "Đại lý DEKTON chính hãng | Thiên Minh Group";
 const DEFAULT_META_DESCRIPTION = "Thiên Minh Group phân phối DEKTON chính hãng tại Việt Nam: máy pin, máy cắt, máy nén khí, máy rửa xe và phụ kiện. Tư vấn nhanh, COD toàn quốc.";
@@ -895,7 +896,7 @@ function OrderModal({ product, onClose, stockKnown }) {
       : [];
     const webTotal = Math.round(Number(product?.price) || 0) * qty; // cùng cách tính với số hiện ở "Tạm tính"
     // Khách sửa nội dung đơn giữa 2 lần gửi -> mã chống trùng cũ sẽ làm máy chủ trả lại đơn cũ: đổi mã mới.
-    const sig = orderSignature([product.sku, qty, phone, address, isBusiness ? "business" : "individual", isBusiness ? taxCode : ""]);
+    const sig = orderSignature([product.sku, qty, name, phone, address, isBusiness ? "business" : "individual", isBusiness ? taxCode : ""]);
     if (sentSigRef.current !== null && sentSigRef.current !== sig) orderKeyRef.current = makeOrderKey();
     sentSigRef.current = sig;
     const payload = {
@@ -963,6 +964,8 @@ function OrderModal({ product, onClose, stockKnown }) {
         setStatus({ tone: "error", contacts: true, retry: true, text: detail || `Anh/chị gửi đơn quá nhiều lần trong thời gian ngắn. Vui lòng thử lại sau ít phút hoặc gọi ${HOTLINE_MAIN_TEXT}.` });
       } else if (code === 503) {
         setStatus({ tone: "error", contacts: true, retry: true, text: detail || `Hệ thống đang bận, anh/chị vui lòng gọi ${HOTLINE_MAIN_TEXT} hoặc Zalo để chốt đơn.` });
+      } else if (code === 413) {
+        setStatus({ tone: "error", contacts: true, retry: true, text: detail || `Nội dung đơn quá lớn, anh/chị vui lòng rút gọn hoặc gọi ${HOTLINE_MAIN_TEXT} để chốt đơn.` });
       } else {
         setStatus({ tone: "error", contacts: true, retry: true, text: ORDER_SEND_ERROR });
       }
