@@ -697,8 +697,24 @@ function composeVnAddress(f) {
     .join(", ");
 }
 
+// Chỉ giữ chữ số; +84xxxxxxxxx / 84xxxxxxxxx (11 số) -> 0xxxxxxxxx (cùng luật với máy chủ).
 function normalizePhone(value) {
-  return String(value || "").replace(/[^\d]/g, "");
+  const digits = String(value || "").replace(/[^\d]/g, "");
+  if (/^84\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
+  if (/^840\d{9}$/.test(digits)) return digits.slice(2);
+  return digits;
+}
+
+// Chữ khách đang gõ trong ô chọn có khớp CHÍNH XÁC (không dấu) một mục không -> trả mục đó, không thì "".
+function matchTyped(text, options) {
+  const n = normVi(text);
+  if (!n) return "";
+  return options.find((o) => normVi(o) === n) || "";
+}
+
+// Chữ ký nội dung đơn: đổi bất kỳ trường nào bên dưới thì coi là đơn khác (phải có mã chống trùng mới).
+function orderSignature(parts) {
+  return JSON.stringify(parts);
 }
 
 function normVi(s) {
@@ -718,23 +734,36 @@ function capWords(s) {
 }
 
 // Ô chọn có tìm kiếm gõ-để-lọc (không dấu). Giá trị chỉ hợp lệ khi khách chọn 1 mục.
-function SearchSelect({ value, onChange, options, placeholder, disabled }) {
+// typedRef (tuỳ chọn): luôn giữ chữ đang gõ để nút Gửi đơn tự nhận khi khách gõ đủ tên mà chưa kịp chọn.
+function SearchSelect({ value, onChange, options, placeholder, disabled, typedRef }) {
   const [q, setQ] = useState(value || "");
   const [open, setOpen] = useState(false);
-  useEffect(() => { setQ(value || ""); }, [value]);
+  const timerRef = useRef(null);
+  const latest = useRef({ q: value || "", value: value || "", options });
+  latest.current.value = value || "";
+  latest.current.options = options;
+  const setText = (t) => { latest.current.q = t; if (typedRef) typedRef.current = t; setQ(t); };
+  useEffect(() => { setText(value || ""); }, [value]);
+  // Dọn hẹn giờ khi ô bị gỡ khỏi màn hình (đổi tỉnh / đóng form) — không gọi onChange trên ô đã chết.
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
   const nq = normVi(q);
   const filtered = (nq ? options.filter((o) => normVi(o).includes(nq)) : options).slice(0, 60);
   return <div style={{ position: "relative" }}>
     <input value={q} placeholder={placeholder} disabled={disabled} style={inputStyle()}
-      onChange={(e) => { setQ(e.target.value); setOpen(true); if (value) onChange(""); }}
+      onChange={(e) => { setText(e.target.value); setOpen(true); if (value) onChange(""); }}
       onFocus={() => setOpen(true)}
-      onBlur={() => setTimeout(() => {
-        setOpen(false);
-        const exact = options.find((o) => normVi(o) === normVi(q));
-        if (exact) { onChange(exact); setQ(exact); } else { setQ(value || ""); }
-      }, 160)} />
+      onBlur={() => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null;
+          setOpen(false);
+          const cur = latest.current;
+          const exact = matchTyped(cur.q, cur.options);
+          if (exact) { if (exact !== cur.value) onChange(exact); setText(exact); } else { setText(cur.value); }
+        }, 160);
+      }} />
     {open && !disabled && filtered.length > 0 && <div className="ss-list">
-      {filtered.map((o) => <div key={o} className="ss-item" onMouseDown={() => { onChange(o); setQ(o); setOpen(false); }}>{o}</div>)}
+      {filtered.map((o) => <div key={o} className="ss-item" onMouseDown={() => { onChange(o); setText(o); setOpen(false); }}>{o}</div>)}
     </div>}
   </div>;
 }
@@ -754,6 +783,10 @@ function OrderModal({ product, onClose, stockKnown }) {
   const sendingRef = useRef(false);
   const statusRef = useRef(null);
   const orderKeyRef = useRef(null);
+  const sentSigRef = useRef(null); // chữ ký nội dung lần gửi trước — lệch thì phải đổi mã chống trùng
+  const provTypedRef = useRef("");
+  const wardTypedRef = useRef("");
+  const [wardManual, setWardManual] = useState(false);
   if (orderKeyRef.current === null) orderKeyRef.current = makeOrderKey();
 
   // Phường/xã: tải theo tỉnh; lỗi/rỗng -> khách gõ tay + nút thử lại (không bao giờ kẹt "Đang tải...").
@@ -781,14 +814,20 @@ function OrderModal({ product, onClose, stockKnown }) {
   useEffect(() => {
     setDone(null); setStatus(null); setShowContacts(false); setTaxLookup(null); setCopied(false);
     setForm(EMPTY_ORDER_FORM);
+    setWardManual(false);
+    provTypedRef.current = ""; wardTypedRef.current = "";
     orderKeyRef.current = makeOrderKey();
+    sentSigRef.current = null;
     sendingRef.current = false;
   }, [product?.sku]);
+
+  // Đổi tỉnh thì bỏ chế độ gõ tay phường của tỉnh cũ.
+  useEffect(() => { setWardManual(false); wardTypedRef.current = ""; }, [form.province]);
 
   const sending = status === "sending";
   const statusObj = status && status !== "sending" ? status : null;
   const qtyNum = Math.floor(Number(form.qty)) || 1;
-  const total = (Number(product?.price) || 0) * Math.max(1, qtyNum);
+  const total = Math.round(Number(product?.price) || 0) * Math.max(1, qtyNum);
   const upd = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const lookupTax = async () => {
@@ -817,7 +856,18 @@ function OrderModal({ product, onClose, stockKnown }) {
     const fail = (text) => setStatus({ tone: "error", text });
     const name = titleCaseName(form.name);
     const phone = normalizePhone(form.phone);
-    const street = capWords(form.street), ward = form.ward.trim(), province = form.province.trim();
+    // Khách gõ đủ tên tỉnh / phường rồi bấm Gửi luôn (chưa kịp chọn): nhận nếu khớp CHÍNH XÁC (không dấu) một mục.
+    let province = form.province.trim();
+    if (!province) {
+      const hit = matchTyped(provTypedRef.current, VN_PROVINCES.map((p) => p.name));
+      if (hit) { province = hit; setForm((f) => ({ ...f, province: hit, ward: "" })); }
+    }
+    let ward = form.ward.trim();
+    if (!ward && province === form.province.trim() && wards.state === "ok" && !wardManual) {
+      const hit = matchTyped(wardTypedRef.current, wards.list);
+      if (hit) { ward = hit; upd("ward", hit); }
+    }
+    const street = capWords(form.street);
     if (!name) return fail("Vui lòng nhập họ tên người nhận.");
     if (!/^0\d{9}$/.test(phone)) return fail("Số điện thoại chưa đúng — cần 10 số, bắt đầu bằng 0.");
     if (!street) return fail("Vui lòng nhập số nhà + tên đường.");
@@ -843,7 +893,11 @@ function OrderModal({ product, onClose, stockKnown }) {
           name: item.name || item.product_name || item.sku,
         })).filter((item) => item.sku)
       : [];
-    const webTotal = Math.round((Number(product?.price) || 0) * qty);
+    const webTotal = Math.round(Number(product?.price) || 0) * qty; // cùng cách tính với số hiện ở "Tạm tính"
+    // Khách sửa nội dung đơn giữa 2 lần gửi -> mã chống trùng cũ sẽ làm máy chủ trả lại đơn cũ: đổi mã mới.
+    const sig = orderSignature([product.sku, qty, phone, address, isBusiness ? "business" : "individual", isBusiness ? taxCode : ""]);
+    if (sentSigRef.current !== null && sentSigRef.current !== sig) orderKeyRef.current = makeOrderKey();
+    sentSigRef.current = sig;
     const payload = {
       name,
       phone,
@@ -886,6 +940,7 @@ function OrderModal({ product, onClose, stockKnown }) {
         setCopied(false);
         setStatus(null);
         orderKeyRef.current = makeOrderKey(); // đơn kế tiếp là đơn mới
+        sentSigRef.current = null;
         return;
       }
       // Máy chủ trả lời nhưng KHÔNG xác nhận đã nhận: mời khách gọi trước thay vì bấm gửi lại (tránh trùng đơn).
@@ -902,6 +957,7 @@ function OrderModal({ product, onClose, stockKnown }) {
       if (code === 422) {
         // Đơn bị từ chối vì dữ liệu -> chưa tạo đơn; khách sửa rồi gửi lại thì coi là đơn mới.
         orderKeyRef.current = makeOrderKey();
+        sentSigRef.current = null;
         setStatus({ tone: "error", text: detail || `Thông tin chưa hợp lệ, anh/chị kiểm lại hoặc gọi ${HOTLINE_MAIN_TEXT}.` });
       } else if (code === 429) {
         setStatus({ tone: "error", contacts: true, retry: true, text: detail || `Anh/chị gửi đơn quá nhiều lần trong thời gian ngắn. Vui lòng thử lại sau ít phút hoặc gọi ${HOTLINE_MAIN_TEXT}.` });
@@ -960,11 +1016,18 @@ function OrderModal({ product, onClose, stockKnown }) {
         </div>
         <div className="field"><label>{form.customerType === "business" ? "Họ tên người nhận hàng" : "Họ tên người nhận"}</label><input value={form.name} maxLength={80} autoComplete="name" placeholder="Ví dụ: Nguyễn Văn An" style={inputStyle()} onChange={(e) => upd("name", e.target.value)} onBlur={() => upd("name", titleCaseName(form.name))} /></div>
         {tf("phone", "Số điện thoại", "Ví dụ: 0901 234 567", { maxLength: 20, autoComplete: "tel", type: "tel" })}
-        <div className="field"><label>① Số nhà + tên đường</label><input value={form.street} maxLength={150} autoComplete="street-address" placeholder="Ví dụ: 25 Lê Lợi" style={inputStyle()} onChange={(e) => upd("street", e.target.value)} onBlur={() => upd("street", capWords(form.street))} /></div>
-        {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><SearchSelect value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v, ward: "" }))} options={VN_PROVINCES.map((p) => p.name)} placeholder="Gõ để tìm — vd: hồ chí, hà nội" /></div>}
+        <div className="field"><label>① Số nhà + tên đường</label><input value={form.street} maxLength={120} autoComplete="street-address" placeholder="Ví dụ: 25 Lê Lợi" style={inputStyle()} onChange={(e) => upd("street", e.target.value)} onBlur={() => upd("street", capWords(form.street))} /></div>
+        {hasStreet && <div className="field"><label>② Tỉnh / Thành phố</label><SearchSelect value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v, ward: "" }))} options={VN_PROVINCES.map((p) => p.name)} placeholder="Gõ để tìm — vd: hồ chí, hà nội" typedRef={provTypedRef} /></div>}
         {hasProvince && <div className="field"><label>③ Phường / Xã / Thị trấn</label>
-          {wards.state === "ok" && <SearchSelect value={form.ward} onChange={(v) => upd("ward", v)} options={wards.list} placeholder="Gõ để tìm — vd: chánh hưng" />}
+          {wards.state === "ok" && !wardManual && <>
+            <SearchSelect value={form.ward} onChange={(v) => upd("ward", v)} options={wards.list} placeholder="Gõ để tìm — vd: chánh hưng" typedRef={wardTypedRef} />
+            <div className="ward-note"><button type="button" className="link-btn" onClick={() => { setWardManual(true); upd("ward", ""); }}>Không thấy phường của tôi</button></div>
+          </>}
           {wards.state === "loading" && <input disabled value="" placeholder="Đang tải phường/xã..." style={inputStyle()} />}
+          {wards.state === "ok" && wardManual && <>
+            <input value={form.ward} maxLength={80} placeholder="Gõ tên phường / xã / thị trấn" style={inputStyle()} onChange={(e) => upd("ward", e.target.value)} onBlur={() => upd("ward", capWords(form.ward))} />
+            <div className="ward-note">Anh/chị cứ gõ tay, đơn vẫn gửi được. <button type="button" className="link-btn" onClick={() => { setWardManual(false); upd("ward", ""); }}>Chọn từ danh sách</button></div>
+          </>}
           {wards.state === "error" && <>
             <input value={form.ward} maxLength={80} placeholder="Gõ tên phường / xã / thị trấn" style={inputStyle()} onChange={(e) => upd("ward", e.target.value)} onBlur={() => upd("ward", capWords(form.ward))} />
             <div className="ward-note">Chưa tải được danh sách phường/xã — anh/chị cứ gõ tay, đơn vẫn gửi được. <button type="button" className="link-btn" onClick={() => setWardTry((n) => n + 1)}>Thử tải lại</button></div>
@@ -1045,7 +1108,7 @@ export default function App() {
     if (cat !== "all") params.set("cat", cat);
     if (search.trim()) params.set("q", search.trim());
     const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash}`;
-    window.history.replaceState(null, "", nextUrl);
+    try { window.history.replaceState(null, "", nextUrl); } catch (e) { /* Safari/khung nhúng có thể chặn — bỏ qua, không làm trắng trang */ }
   }, [cat, search]);
   const publishableProducts = useMemo(() => products.filter(productReadyForStorefront), [products]);
   // Chỉ gắn nhãn "Hết hàng" khi dữ liệu tồn kho thật sự có (ít nhất 1 món lẻ còn hàng) — tránh khoá nhầm cả shop nếu tồn kho không về.
@@ -1087,6 +1150,8 @@ export default function App() {
   const pageKey = `${cat}|${search.trim()}`;
   const [pageState, setPageState] = useState({ key: pageKey, n: pageStep });
   const visibleCount = pageState.key === pageKey ? pageState.n : pageStep;
+  // Đổi danh mục / từ khoá: xoá trang cũ, để quay lại danh mục đã xem cũng bắt đầu từ trang đầu.
+  useEffect(() => { setPageState({ key: pageKey, n: pageStep }); }, [pageKey, pageStep]);
   const visibleProducts = useMemo(() => showroomProducts.slice(0, visibleCount), [showroomProducts, visibleCount]);
   const showMore = () => setPageState({ key: pageKey, n: visibleCount + pageStep });
 
