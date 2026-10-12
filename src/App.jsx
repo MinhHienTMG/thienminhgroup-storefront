@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import productImageManifest from "./productImageManifest.json";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? "" : "https://web-production-7d03f.up.railway.app");
@@ -633,8 +633,18 @@ function orderReceived(res) {
 
 const ORDER_CONTACTS = [["Minh Hiền", "0909418151"], ["Ngọc Linh", "0909858011"], ["Minh Thắng", "0937858011"]];
 
-function OrderContactList() {
-  return ORDER_CONTACTS.map(([nm, ph]) => <div key={ph} className="contact-row">
+// Danh bạ màn Cảm ơn / lỗi đặt hàng: lấy từ /api/public/settings (qua customerActions) nếu có số hợp lệ; không có thì dùng 3 số cũ.
+function orderContactsFrom(actions) {
+  const rows = (actions?.call_hotline?.contacts || []).map((c) => {
+    let ph = String(c?.phone || "").replace(/\D/g, "");
+    if (ph.startsWith("84") && ph.length >= 11) ph = `0${ph.slice(2)}`;
+    return [String(c?.name || "").trim() || "Hotline", ph];
+  }).filter(([, ph]) => /^0\d{9,10}$/.test(ph));
+  return rows.length ? rows : ORDER_CONTACTS;
+}
+
+function OrderContactList({ contacts = ORDER_CONTACTS }) {
+  return contacts.map(([nm, ph]) => <div key={ph} className="contact-row">
     <span className="contact-name">{nm}</span>
     <a className="contact-tel" href={`tel:${ph}`}>📞 {ph}</a>
     <a className="contact-zalo" href={`https://zalo.me/${ph}`} target="_blank" rel="noopener noreferrer">💬 Zalo</a>
@@ -782,7 +792,7 @@ function SearchSelect({ value, onChange, options, placeholder, disabled, typedRe
 const EMPTY_ORDER_FORM = { name: "", phone: "", street: "", ward: "", province: "", qty: 1, customerType: "individual", taxCode: "", companyName: "", companyAddress: "" };
 const ORDER_SEND_ERROR = "Hệ thống đang bận, chưa xác nhận được đơn của anh/chị. Vui lòng gọi hoặc nhắn Zalo cho shop theo số bên dưới để chốt đơn ngay. Shop có thể đã nhận được thông tin, nên anh/chị vui lòng gọi trước — chỉ bấm \"Gửi lại đơn\" khi chưa liên lạc được shop. Thông tin anh/chị đã nhập vẫn được giữ nguyên.";
 
-function OrderModal({ product, onClose, stockKnown }) {
+function OrderModal({ product, onClose, stockKnown, contacts = ORDER_CONTACTS }) {
   const [form, setForm] = useState(EMPTY_ORDER_FORM);
   const [status, setStatus] = useState(null);
   const [taxLookup, setTaxLookup] = useState(null);
@@ -1004,7 +1014,7 @@ function OrderModal({ product, onClose, stockKnown }) {
             <button type="button" className="submit-order" onClick={onClose}>Tiếp tục xem sản phẩm</button>
             <button type="button" className="ghost-btn" onClick={() => setShowContacts(true)}>📞 Gọi / Zalo shop ngay</button>
           </div> : <div className="contact-list">
-            <OrderContactList />
+            <OrderContactList contacts={contacts} />
             <button type="button" className="ghost-btn" onClick={onClose}>Đóng</button>
           </div>}
         </div>
@@ -1057,7 +1067,7 @@ function OrderModal({ product, onClose, stockKnown }) {
         </div>}
         <div className="field"><label>Số lượng</label><input type="number" min="1" max="50" step="1" inputMode="numeric" value={form.qty} onChange={(e) => upd("qty", e.target.value)} style={inputStyle()} /></div>
         {longStatus && <div ref={statusRef} className={`status ${longStatus.tone || ""}`.trim()} role="alert">{longStatus.text}</div>}
-        {longStatus && <div className="contact-list" style={{ marginTop: 10 }}><OrderContactList /></div>}
+        {longStatus && <div className="contact-list" style={{ marginTop: 10 }}><OrderContactList contacts={contacts} /></div>}
       </div>
       <div className="modal-foot">
         {shortStatus && <div className={`status ${shortStatus.tone || ""}`.trim()} role="alert">{shortStatus.text}</div>}
@@ -1087,6 +1097,7 @@ export default function App() {
   const [hotlineOpen, setHotlineOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const actions = useMemo(() => customerActions(settings), [settings]);
+  const orderContacts = useMemo(() => orderContactsFrom(actions), [actions]);
   // /products, /banners, /settings tải độc lập: banner/cài đặt lỗi không được làm mất danh sách hàng.
   useEffect(() => {
     let alive = true;
@@ -1127,23 +1138,25 @@ export default function App() {
   // Chỉ gắn nhãn "Hết hàng" khi dữ liệu tồn kho thật sự có (ít nhất 1 món lẻ còn hàng) — tránh khoá nhầm cả shop nếu tồn kho không về.
   const stockKnown = useMemo(() => products.some((p) => p.type !== "combo" && !(Array.isArray(p.items) && p.items.length) && Number(p.stock) > 0), [products]);
   const cats = useMemo(() => [...new Set(publishableProducts.map(customerCategoryPath))].sort(categorySort), [publishableProducts]);
-  // Chỉ mục tìm kiếm không dấu, tính 1 lần khi dữ liệu đổi.
-  const searchIndex = useMemo(() => publishableProducts.map((p) => ({ p, text: normVi(`${p.name} ${p.sku} ${cleanText(p.desc)}`) })), [publishableProducts]);
-  const searching = search.trim().length > 0;
+  // Chỉ mục tìm kiếm không dấu + đường dẫn danh mục, tính 1 lần khi dữ liệu đổi (không tính lại mỗi phím gõ).
+  const searchIndex = useMemo(() => publishableProducts.map((p) => ({ p, text: normVi(`${p.name} ${p.sku} ${cleanText(p.desc)}`), path: customerCategoryPath(p) })), [publishableProducts]);
+  const pathByProduct = useMemo(() => new Map(searchIndex.map(({ p, path }) => [p, path])), [searchIndex]);
+  // Ô gõ vẫn phản hồi ngay; danh sách kết quả đuổi theo sau để máy yếu không bị giật.
+  const deferredSearch = useDeferredValue(search);
+  const searching = deferredSearch.trim().length > 0;
   const shown = useMemo(() => {
-    const tokens = normVi(search).split(/\s+/).filter(Boolean);
-    return searchIndex.filter(({ p, text }) => {
-      const path = customerCategoryPath(p);
+    const tokens = normVi(deferredSearch).split(/\s+/).filter(Boolean);
+    return searchIndex.filter(({ text, path }) => {
       const inCategory = cat === "all" || path === cat || path.startsWith(`${cat} > `);
       return inCategory && tokens.every((t) => text.includes(t));
     }).map(({ p }) => p);
-  }, [searchIndex, cat, search]);
+  }, [searchIndex, cat, deferredSearch]);
   // Món giá 0 / hết hàng xếp CUỐI (giữ nguyên thứ tự gốc trong từng nhóm).
   const isLocked = (p) => !(Number(p.price) > 0) || (stockKnown && isOutOfStock(p));
   const showroomProducts = useMemo(() => {
-    const base = cat === "all" ? shown.filter((p) => categoryMain(customerCategoryPath(p)) !== "Dịch Vụ") : shown;
+    const base = cat === "all" ? shown.filter((p) => categoryMain(pathByProduct.get(p) || customerCategoryPath(p)) !== "Dịch Vụ") : shown;
     return [...base.filter((p) => !isLocked(p)), ...base.filter(isLocked)];
-  }, [shown, cat, stockKnown]);
+  }, [shown, cat, stockKnown, pathByProduct]);
   // 3 khu gợi ý: tối đa 8 món, chỉ lấy món đặt được, không lặp món giữa các khu.
   const curated = useMemo(() => {
     const keyOf = (p) => normalizeSkuForImage(p?.sku) || String(p?.id || p?.name || "");
@@ -1160,7 +1173,7 @@ export default function App() {
   }, [showroomProducts, stockKnown]);
   // Phân trang: khu "Tất cả" 24 món (kết quả tìm kiếm 48), mỗi lần "Xem thêm" thêm 1 trang; đổi danh mục / từ khoá thì về lại trang đầu.
   const pageStep = searching ? SEARCH_PAGE : LIST_PAGE;
-  const pageKey = `${cat}|${search.trim()}`;
+  const pageKey = `${cat}|${deferredSearch.trim()}`;
   const [pageState, setPageState] = useState({ key: pageKey, n: pageStep });
   const visibleCount = pageState.key === pageKey ? pageState.n : pageStep;
   // Đổi danh mục / từ khoá: xoá trang cũ, để quay lại danh mục đã xem cũng bắt đầu từ trang đầu.
@@ -1183,12 +1196,12 @@ export default function App() {
         {!searching && <ProductSection id="best-sellers" title="Bán chạy" kicker="Dòng máy được quan tâm" products={curated.best} onOrder={setOrderProduct} actions={actions} stockKnown={stockKnown} />}
         {!searching && <ProductSection id="new-arrivals" title="Hàng mới về" kicker="Vừa cập nhật" products={curated.fresh} onOrder={setOrderProduct} actions={actions} stockKnown={stockKnown} />}
         {!searching && <ProductSection id="featured" title="Hàng nổi bật" kicker="Gợi ý chọn mua" products={curated.featured} onOrder={setOrderProduct} actions={actions} stockKnown={stockKnown} />}
-        <ProductSection id="products" title={searching ? "Kết quả tìm kiếm" : "Tất cả sản phẩm"} kicker={searching ? `“${search.trim()}”` : (cat === "all" ? "Danh mục đang bán" : cat)} products={visibleProducts} totalCount={showroomProducts.length} onMore={showMore} onOrder={setOrderProduct} actions={actions} stockKnown={stockKnown} />
-        {!err && !shown.length && <div className="wrap"><div className="state-card">Không tìm thấy sản phẩm phù hợp{searching ? <> với “{search.trim()}”</> : null}.{" "}Anh/chị thử từ khóa khác hoặc gọi {HOTLINE_MAIN_TEXT} để được tư vấn.</div></div>}
+        <ProductSection id="products" title={searching ? "Kết quả tìm kiếm" : "Tất cả sản phẩm"} kicker={searching ? `“${deferredSearch.trim()}”` : (cat === "all" ? "Danh mục đang bán" : cat)} products={visibleProducts} totalCount={showroomProducts.length} onMore={showMore} onOrder={setOrderProduct} actions={actions} stockKnown={stockKnown} />
+        {!err && !shown.length && <div className="wrap"><div className="state-card">Không tìm thấy sản phẩm phù hợp{searching ? <> với “{deferredSearch.trim()}”</> : null}.{" "}Anh/chị thử từ khóa khác hoặc gọi {HOTLINE_MAIN_TEXT} để được tư vấn.</div></div>}
       </>}
     </main>
     <Footer settings={settings} />
     <HotlineModal contacts={hotlineOpen ? actions.call_hotline.contacts : []} onClose={() => setHotlineOpen(false)} />
-    <OrderModal product={orderProduct} onClose={() => setOrderProduct(null)} stockKnown={stockKnown} />
+    <OrderModal product={orderProduct} onClose={() => setOrderProduct(null)} stockKnown={stockKnown} contacts={orderContacts} />
   </div>;
 }
